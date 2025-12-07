@@ -7,9 +7,13 @@ const googleEmail = process.env.GOOGLEEMAIL;
 const googleKey = process.env.GOOGLEKEY;
 const googleSheetID = process.env.GOOGLESHEETID;
 
+// Check if Google Sheets is configured
+const useGoogleSheets = !!(googleEmail && googleKey && googleSheetID);
+
 module.exports.cloudDir = cloudDir;
 module.exports.storageDir = storageDir;
 module.exports.tags = tags;
 module.exports.googleEmail = googleEmail;
 module.exports.googleKey = googleKey;
 module.exports.googleSheetID = googleSheetID;
+module.exports.useGoogleSheets = useGoogleSheets;

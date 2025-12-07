@@ -3,10 +3,35 @@ const manage = require('../scr/manage');
 const utils = require('../utils');
 const db = require('../scr/db');
 const commands = require('./commands');
+const config = require('../config');
 
 let start = async function(){
     console.clear();
     utils.printLogo();
+    
+    // Build menu choices based on configuration
+    let menuChoices = [
+        new inquirer.Separator(), 
+        'Profiles',
+    ];
+    
+    // Only show Dashboard option if Google Sheets is configured
+    if (config.useGoogleSheets) {
+        menuChoices.push('Dashboard');
+    }
+    
+    menuChoices.push(
+        'Multiprocessing',
+        'About',
+        new inquirer.Separator(), 
+        'Exit'
+    );
+    
+    // Show storage mode info
+    if (!config.useGoogleSheets) {
+        console.log(utils.timeLog() + 'Running in LOCAL MODE (no Google Sheets integration)');
+    }
+    
     inquirer.prompt([
     {
       type: 'list',
@@ -14,15 +39,7 @@ let start = async function(){
       name: 'section',
       message: 'Select a section:',
       prefix: utils.timeLog(),
-      choices: [
-        new inquirer.Separator(), 
-        'Profiles',
-        'Dashboard',
-        'Multiprocessing',
-        'About',
-        new inquirer.Separator(), 
-        'Exit',
-      ],
+      choices: menuChoices,
     }
     ]).then(async (answers) => {
         switch(answers.section) {
@@ -95,6 +112,12 @@ let dashboard = async function(){
 };
 
 let storage_Type = async function(){
+    // If Google Sheets is not configured, force Local mode
+    if (!config.useGoogleSheets) {
+        utils.storageType = 'Local';
+        return profiles_Menu();
+    }
+    
     inquirer.prompt([
         {
           type: 'list',

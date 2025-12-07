@@ -1,0 +1,21 @@
+# Environment variables
+.env
+
+# Node modules
+node_modules/
+
+# Storage data
+storage/
+
+# Camoufox data
+data/
+
+# Engines data
+engines/data*/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

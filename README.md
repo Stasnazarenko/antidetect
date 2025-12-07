@@ -4,7 +4,9 @@
 </p>
 
 <p >
-   <img src="https://img.shields.io/badge/build-v_1.1-brightgreen?label=Version" alt="Version">
+   <img src="https://img.shields.io/badge/build-v_2.0-brightgreen?label=Version" alt="Version">
+   <img src="https://img.shields.io/badge/macOS-supported-blue" alt="macOS Support">
+   <img src="https://img.shields.io/badge/ARM-supported-blue" alt="ARM Support">
 </p>
 
 
@@ -15,9 +17,15 @@
 
 A console application with a simple user interface for managing and working with browser profiles with anti-detection protection. 
 
-It is based on the [browser-with-fingerprints](https://github.com/CheshireCaat/browser-with-fingerprints) plugin, which allows you to change your browser fingerprint, create a virtual identity and increase the secrecy of your browser. 
+**Now powered by [Camoufox](https://github.com/daijro/camoufox)** - an advanced anti-fingerprinting tool for Firefox automation with native support for **macOS** and **ARM** architectures!
 
-This is done using the [FingerprintSwitcher](https://fingerprints.bablosoft.com/) service, which allows you to replace a list of important browser properties, so you will behave like a completely new user.
+The application uses Camoufox's sophisticated browser fingerprint spoofing capabilities to create virtual identities and increase the secrecy of your browser. Camoufox provides advanced anti-detection features including:
+
+- **Advanced Fingerprint Spoofing**: Built-in fingerprint generation without relying on external services
+- **GeoIP Integration**: Automatic timezone, language, and location configuration based on your IP/proxy
+- **Human-like Behavior**: Cursor movement humanization for more natural browsing
+- **WebRTC Protection**: Built-in WebRTC blocking to prevent IP leaks
+- **Cross-Platform Support**: Native support for Windows, macOS (including M1/M2), and Linux
 
 The application will allow you to increase your anonymity on the web. You can use multi-accounts on any platforms as different users. Thanks to the simple console interface, you don't need any skills to use antidetect. This project is for the community and I will gradually develop and improve it in the future. 
 
@@ -28,11 +36,13 @@ The aim of my project, the "Antidetect browser," is to empower users with the ab
 - **Creating Custom Browser Profiles**: Users can craft browser profiles tailored to their specific needs, with unique configurations and settings.
 - **Proxy Integration**: Each profile supports the integration of proxy servers, enabling anonymous connections to the Internet.
 
-- **Fingerprint Masking**: I've implemented features to mask and alter digital browser fingerprints like User-Agent and Canvas Fingerprint, allowing users to evade tracking systems effectively.
+- **Fingerprint Masking**: Advanced fingerprint masking powered by Camoufox and BrowserForge, including User-Agent, Canvas Fingerprint, WebGL, and more.
 
-- **Enhanced Privacy Features**: Users have the ability to disable potentially identifying features such as WebRTC and Canvas Fingerprinting, thus elevating their level of anonymity and privacy.
+- **Enhanced Privacy Features**: Automatic WebRTC blocking, timezone/geolocation based on proxy, and other privacy-preserving features.
 
 - **Secure Data Management**: The project provides users with the means to manage their own data storage for each profile, ensuring data isolation and privacy between profiles.
+
+- **macOS & ARM Support**: Now fully compatible with macOS (including Apple Silicon M1/M2) and ARM architectures.
 
 With the "Antidetect browser," I aim to offer users a comprehensive toolset to navigate the online world with confidence, knowing that their privacy and anonymity are prioritized.
 
@@ -70,29 +80,27 @@ The Dashboard can be customized to suit your needs, with additional columns adde
 
 ### Fingerprint
 
-The application allows you to change the digital fingerprint of each profile. When creating a new profile, a digital fingerprint is assigned to it, which you can later modify. Using the [FingerprintSwitcher](https://fingerprints.bablosoft.com/#home), we obtain the real fingerprint in JSON format and apply it to open the profile with that fingerprint.
+The application uses **Camoufox** for advanced browser fingerprinting and anti-detection. When creating a new profile, Camoufox automatically generates a realistic fingerprint based on your configuration (OS type, screen dimensions, etc.). 
 
-The service offers extensive capabilities for effective masking, the main ones of which are outlined below.
-<p align="center">
-      <img src="https://i.ibb.co/d67mf4W/2.png" >
-</p>
-The effectiveness of this masking has been confirmed in practice. Test results are similar to another antidetect browser (AdsPower) and are presented below.
+Camoufox leverages **BrowserForge** to generate authentic browser fingerprints that closely mimic real users. The fingerprinting system includes:
 
+- **Automatic Fingerprint Generation**: No external API keys required - fingerprints are generated locally
+- **OS Spoofing**: Emulate Windows, macOS, or Linux systems
+- **Screen Dimension Randomization**: Configurable screen resolution constraints
+- **WebGL/Canvas Fingerprinting**: Sophisticated spoofing to avoid detection
+- **Hardware Concurrency**: Realistic CPU core count spoofing
+- **GeoIP-based Configuration**: Automatically set timezone, locale, and geolocation based on your proxy IP
 
+The effectiveness of Camoufox's anti-detection has been proven to pass major fingerprinting tests with high trust scores. The browser is specifically designed to evade detection by advanced bot detection systems.
 
-For testing, the following tools were used:
+For testing, the following tools can be used:
 1. [CreepJS](https://abrahamjuliot.github.io/creepjs/)
 2. [FingerprintJS](https://fingerprintjs.github.io/fingerprintjs/)
 3. [Incolumitas](https://bot.incolumitas.com/)
 4. [Fingerprint.com](https://fingerprint.com/products/bot-detection/)
+5. [BrowserScan](https://browserscan.net/)
 
-<p align="center">
-      <img src="https://i.ibb.co/r785yxp/creepsjs.png" >
-</p>
-<p align="center">
-      <img src="https://i.ibb.co/VYH6BP3/fingerprintjs.png" >
-</p>
-<p align="center">
+Camoufox is built on Firefox and provides superior anti-detection compared to Chromium-based solutions, with native support for macOS (including Apple Silicon) and ARM architectures.
       <img src="https://i.ibb.co/zS4C6b4/Behavioral.png" >
 </p>
 <p align="center">
@@ -103,9 +111,15 @@ Certainly, these results are quite subjective, but you can use this data to comp
 
 ### Proxy
 
-The browser supports proxies, you can configure them in both the dashboard and the console application. The following connection protocols are available: HTTPS and SOCKS5, you can connect to proxies using login and password is possible. 
+The browser supports proxies, you can configure them in both the dashboard and the console application. The following connection protocols are available: HTTPS and SOCKS5, you can connect to proxies using login and password. 
 
-The browser automatically sets the time, language, and geolocation according to your proxy settings, and also prevents IP address leakage through WebRTC.
+**Camoufox automatically configures browser settings based on your proxy:**
+- **Timezone & Geolocation**: Automatically detects and sets timezone and geolocation based on the proxy IP address using GeoIP
+- **Language & Locale**: Sets appropriate language and locale for the detected location
+- **WebRTC Protection**: Built-in WebRTC blocking prevents IP address leakage
+- **DNS Leak Prevention**: Ensures all DNS requests go through the proxy
+
+All these features work seamlessly without any additional configuration!
 ### Cloud
 > [!NOTE]
 > In development...
@@ -178,26 +192,52 @@ To configure the `.env` file, follow these steps:
     DIR = ""
     GOOGLEEMAIL = ""
     GOOGLESHEETID = ""
-    FPKEY = ""
     GOOGLEKEY = ""
     NODE_ENV = "test"
     ```
 
-- **DIR**: The path to the `antidetect` directory on Google Drive.
-- **GOOGLEEMAIL**: The `client_email` field from the JSON file of your Google Service Account.
-- **GOOGLESHEETID**: The ID of the Google Sheet. You can find this in the URL on the dashboard page, located between `docs.google.com/spreadsheets/d/` and `/edit?`.
-- **FPKEY**: The fingerprinting key provided by [Bablosoft](https://fingerprints.bablosoft.com/).
-- **GOOGLEKEY**: The `private_key` field from the JSON file of your Google Service Account.
+- **DIR**: The path to the `antidetect` directory on Google Drive (optional if using local mode).
+- **GOOGLEEMAIL**: The `client_email` field from the JSON file of your Google Service Account (optional if using local mode).
+- **GOOGLESHEETID**: The ID of the Google Sheet. You can find this in the URL on the dashboard page, located between `docs.google.com/spreadsheets/d/` and `/edit?` (optional if using local mode).
+- **GOOGLEKEY**: The `private_key` field from the JSON file of your Google Service Account (optional if using local mode).
 - **NODE_ENV**: The environment setting. Don't change
+
+> ⚠️ **Note**: The `FPKEY` is no longer required! Camoufox generates fingerprints automatically without external API keys.
 
 > ⚠️ **Note**: Ensure that all sensitive keys and paths are accurately set to prevent configuration issues.
 
+### Running in Local Mode (No Google Sheets Required)
+
+**NEW!** You can now run the application completely locally without any Google Sheets integration. This is perfect for:
+- Quick testing and development
+- Privacy-focused users who don't want cloud integration
+- Simpler setup without Google API configuration
+
+To use local mode, simply:
+1. **Skip Steps 1-3** (Google Spreadsheet, Google API, and Google Drive setup)
+2. Create a `.env` file with empty values or leave Google-related fields blank:
+    ```plaintext
+    DIR = ""
+    GOOGLEEMAIL = ""
+    GOOGLESHEETID = ""
+    GOOGLEKEY = ""
+    NODE_ENV = "test"
+    ```
+3. Run the application normally - it will automatically detect local mode and store all data in `storage/profiles.json`
+
+In local mode:
+- ✅ All profiles are stored locally in a JSON file
+- ✅ No external dependencies or API keys required
+- ✅ Full profile management (create, edit, delete)
+- ✅ All fingerprinting and proxy features work normally
+- ❌ Dashboard/Cloud sync features are disabled (only local storage available)
+
 ## How to Start
 
-1. Node JS
+1. Node JS (version 16 or higher)
 2. Clone the repository to your disk
-3. Configure ```.env``` with the appropriate parameters
-4. Launch the console (for example, Windows PowerShell)
+3. **Optional**: Configure `.env` with Google Sheets parameters (or leave empty for local mode)
+4. Launch the console (for example, Windows PowerShell, Terminal on macOS)
 5. Specify the working directory where you have uploaded the repository in the console using the CD command
     ```
     cd C:\Program Files\brothers
@@ -207,7 +247,13 @@ To configure the `.env` file, follow these steps:
     ```
     npm install
     ```
-7. Run the software
+7. **Optional but Recommended**: Download Camoufox browser binaries
+    ```
+    npx camoufox fetch
+    ```
+    Note: This step may fail in restricted environments. If it fails, Camoufox will attempt to download automatically on first use.
+
+8. Run the software
     ```
     node index
     ```

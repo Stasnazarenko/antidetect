@@ -91,8 +91,10 @@ let launch = async function (name, profile){
     // Camoufox launch options
     let launchOptions = {
       headless: false,
-      persistContext: true,
-      persistContextPath: dir,
+      data_dir: dir, // Use data_dir for persistent context
+      geoip: true, // Enable GeoIP for location-based configuration
+      humanize: true, // Enable human-like cursor movement
+      block_webrtc: true, // Block WebRTC to prevent IP leaks
     };
     
     // Configure fingerprinting if enabled
@@ -100,24 +102,19 @@ let launch = async function (name, profile){
       let fpConfig = JSON.parse(fs.readFileSync(dir + '/fp.json'));
       
       // Apply fingerprint configuration to Camoufox
-      launchOptions.screen = fpConfig.screen || {
-        minWidth: 1440,
-        minHeight: 900,
-        maxWidth: 1920,
-        maxHeight: 1080,
-      };
-      
-      // Enable geolocation based on IP
-      launchOptions.geoip = fpConfig.geoip !== false;
-      
-      // Set hardware concurrency if specified
-      if (fpConfig.hardwareConcurrency) {
-        launchOptions.hardwareConcurrency = fpConfig.hardwareConcurrency;
+      if (fpConfig.screen) {
+        launchOptions.screen = {
+          min_width: fpConfig.screen.minWidth || 1440,
+          min_height: fpConfig.screen.minHeight || 900,
+          max_width: fpConfig.screen.maxWidth || 1920,
+          max_height: fpConfig.screen.maxHeight || 1080,
+        };
       }
       
-      // Enable OS spoofing
+      // Enable OS spoofing - select random OS from the list
       if (fpConfig.os && fpConfig.os.length > 0) {
-        launchOptions.os = fpConfig.os[Math.floor(Math.random() * fpConfig.os.length)];
+        const randomOS = fpConfig.os[Math.floor(Math.random() * fpConfig.os.length)];
+        launchOptions.os = randomOS;
       }
     }
 
@@ -145,14 +142,11 @@ let launch = async function (name, profile){
         launchOptions.proxy.username = username;
         launchOptions.proxy.password = password;
       }
-      
-      // Enable timezone/geolocation based on proxy
-      launchOptions.geoip = true;
     }
 
     // Launch Camoufox
     try {
-      browser = await Camoufox.launch(launchOptions);
+      browser = await Camoufox(launchOptions);
     } catch (error) {
       console.log(utils.timeLog() + ' Error launching Camoufox: ' + error.message);
       browser = false;
