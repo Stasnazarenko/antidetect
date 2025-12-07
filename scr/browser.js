@@ -1,7 +1,6 @@
 const config = require('../config');
 const utils = require('../utils');
 const db = require('./db');
-const { plugin } = require('playwright-with-fingerprints');
 const fs = require('fs');
 const manage = require('./manage');
 const fingerprint = require('./fingerprint');
@@ -10,6 +9,13 @@ const lock = new AsyncLock();
 const axios = require('axios');
 const {SocksProxyAgent} = require('socks-proxy-agent');
 const path = require('path');
+
+// Camoufox is loaded dynamically as it's an ES module
+let Camoufox;
+(async () => {
+  const camoufoxModule = await import('camoufox');
+  Camoufox = camoufoxModule.Camoufox;
+})();
 
 
 let proxyChecker = async function (type, proxy, auth){
@@ -54,16 +60,13 @@ let proxyChecker = async function (type, proxy, auth){
     return false;
 };
 
-let engine = function() {
-  plugin.setRequestTimeout(120 * 60000);
-  let dir = path.resolve(__dirname, '..') + '/engines/' + utils.engine;
-  if (utils.engine != 'main')
-    plugin.setWorkingFolder(dir);
-  else  
-    plugin.setWorkingFolder('./data');
-};
-
 let launch = async function (name, profile){
+  // Ensure Camoufox is loaded
+  if (!Camoufox) {
+    const camoufoxModule = await import('camoufox');
+    Camoufox = camoufoxModule.Camoufox;
+  }
+  
   let browser;
   await lock.acquire('key', async () => {
     let dir;
@@ -85,26 +88,40 @@ let launch = async function (name, profile){
       fs.writeFileSync(dir +'/fp.json', JSON.stringify(data));
     };
 
-    engine();
-    let options = {
-      profile: {},
-      proxy: {
-        changeTimezone: true,
-        changeGeolocation: true,
-        changeBrowserLanguage: true,
-      }
+    // Camoufox launch options
+    let launchOptions = {
+      headless: false,
+      persistContext: true,
+      persistContextPath: dir,
     };
     
+    // Configure fingerprinting if enabled
     if (await profile.get('fingerprint') > false){
-      let fp = JSON.stringify(JSON.parse(fs.readFileSync(dir + '/fp.json')));
-      plugin.useFingerprint(fp, {    
-        // safeElementSize: true,
-        emulateSensorAPI: false,
-      });
+      let fpConfig = JSON.parse(fs.readFileSync(dir + '/fp.json'));
+      
+      // Apply fingerprint configuration to Camoufox
+      launchOptions.screen = fpConfig.screen || {
+        minWidth: 1440,
+        minHeight: 900,
+        maxWidth: 1920,
+        maxHeight: 1080,
+      };
+      
+      // Enable geolocation based on IP
+      launchOptions.geoip = fpConfig.geoip !== false;
+      
+      // Set hardware concurrency if specified
+      if (fpConfig.hardwareConcurrency) {
+        launchOptions.hardwareConcurrency = fpConfig.hardwareConcurrency;
+      }
+      
+      // Enable OS spoofing
+      if (fpConfig.os && fpConfig.os.length > 0) {
+        launchOptions.os = fpConfig.os[Math.floor(Math.random() * fpConfig.os.length)];
+      }
     }
-    else 
-      options.profile.loadFingerprint = false;
 
+    // Configure proxy if set
     let proxyType = await profile.get('proxyType');
     if (!proxyType == false){
       let proxy = await profile.get('proxy');
@@ -118,27 +135,32 @@ let launch = async function (name, profile){
         return false;
       } 
 
-      plugin.useProxy(`${proxyType}://${login}:${proxy.join(":")}`, 
-        options.proxy);
-    }
-    else 
-      options.profile.loadProxy = false;
-
-    plugin.useProfile(dir, options.profile);
-  
-    browser = await plugin.launchPersistentContext(dir, {
-      headless: false,
-      ignoreDefaultArgs: ["--enable-automation", `--allow-file-access-from-files`],
-      // args: [
-      //   `--disable-extensions-except=E:/farm/antidetect/extentions/phantom`,
-      //   `--load-extension=E:/farm/antidetect/extentions/phantom`
-      // ]
+      // Set proxy for Camoufox
+      let [username, password] = login.split(':');
+      launchOptions.proxy = {
+        server: `${proxyType}://${proxy.join(":")}`,
+      };
       
-    });
+      if (username && password) {
+        launchOptions.proxy.username = username;
+        launchOptions.proxy.password = password;
+      }
+      
+      // Enable timezone/geolocation based on proxy
+      launchOptions.geoip = true;
+    }
+
+    // Launch Camoufox
+    try {
+      browser = await Camoufox.launch(launchOptions);
+    } catch (error) {
+      console.log(utils.timeLog() + ' Error launching Camoufox: ' + error.message);
+      browser = false;
+      return false;
+    }
 
     browser.name = name;
-    browser.on('close', async data => {
-      let name = data.name;
+    browser.on('disconnected', async () => {
       console.log(utils.timeLog() + `Profile ${name} closed`);
       delete manage.active[name];
       switch(storageType){
@@ -151,6 +173,7 @@ let launch = async function (name, profile){
       };
     });  
   });
+  
   if (browser == false)
     return false;
   
@@ -165,10 +188,6 @@ let launch = async function (name, profile){
         await browser.close();
         page = false;
       }
-      // let page2 = await browser.newPage();
-      // await page2.goto('https://chromewebstore.google.com/detail/ilehaonighjijnmpnagapkhpcdbhclfg/');
-      // let page = await browser.newPage();
-      // await page.goto('https://www.google.com/search?q=' + name);
     }
     else
       await page.goto('https://abrahamjuliot.github.io/creepjs/');
@@ -176,17 +195,17 @@ let launch = async function (name, profile){
   catch(err){
     await page.goto('https://google.com/');
   }
-  let pages = browser.pages();
+  
+  let pages = await browser.pages();
   for (let i = 0; i < pages.length; i++){
     let url = pages[i].url();
     if (url == 'about:blank')
-      pages[i].close();
+      await pages[i].close();
   };
   return page;
 };
 
 module.exports.launch = launch;
-
 
 
 
