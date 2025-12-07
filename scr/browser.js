@@ -10,12 +10,8 @@ const axios = require('axios');
 const {SocksProxyAgent} = require('socks-proxy-agent');
 const path = require('path');
 
-// Camoufox is loaded dynamically as it's an ES module
-let Camoufox;
-(async () => {
-  const camoufoxModule = await import('camoufox');
-  Camoufox = camoufoxModule.Camoufox;
-})();
+// Camoufox will be loaded dynamically when needed (it's an ES module)
+let Camoufox = null;
 
 
 let proxyChecker = async function (type, proxy, auth){
@@ -61,10 +57,16 @@ let proxyChecker = async function (type, proxy, auth){
 };
 
 let launch = async function (name, profile){
-  // Ensure Camoufox is loaded
+  // Load Camoufox dynamically when first needed
   if (!Camoufox) {
-    const camoufoxModule = await import('camoufox');
-    Camoufox = camoufoxModule.Camoufox;
+    try {
+      const camoufoxModule = await import('camoufox');
+      Camoufox = camoufoxModule.Camoufox;
+    } catch (error) {
+      console.log(utils.timeLog() + ' Error loading Camoufox: ' + error.message);
+      console.log(utils.timeLog() + ' Make sure Camoufox is installed: npm install camoufox');
+      return false;
+    }
   }
   
   let browser;
