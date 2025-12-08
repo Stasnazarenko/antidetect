@@ -8,11 +8,11 @@ import AsyncLock from 'async-lock';
 import axios from 'axios';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import path from 'path';
+import { spawn } from 'child_process';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'url';
 
 const lock = new AsyncLock();
-
-// Camoufox will be loaded dynamically when needed (it's an ES module)
-let Camoufox = null;
 
 
 let proxyChecker = async function (type, proxy, auth){
@@ -57,20 +57,67 @@ let proxyChecker = async function (type, proxy, auth){
     return false;
 };
 
+/**
+ * Launch Camoufox browser via Python bridge
+ */
+async function launchCamoufox(launchConfig) {
+  return new Promise((resolve, reject) => {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const pythonScript = path.join(__dirname, 'camoufox_bridge.py');
+    const configJson = JSON.stringify(launchConfig);
+    
+    const pythonProcess = spawn('python3', [pythonScript, configJson], {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    pythonProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+      
+      // Try to parse connection info
+      try {
+        const lines = stdout.split('\n');
+        for (const line of lines) {
+          if (line.trim().startsWith('{')) {
+            const result = JSON.parse(line);
+            if (result.success && result.wsEndpoint) {
+              resolve({
+                wsEndpoint: result.wsEndpoint,
+                process: pythonProcess
+              });
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        // Continue accumulating output
+      }
+    });
+    
+    pythonProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Python bridge failed: ${stderr || stdout}`));
+      }
+    });
+    
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      pythonProcess.kill();
+      reject(new Error('Camoufox launch timeout'));
+    }, 30000);
+  });
+}
+
 let launch = async function (name, profile){
-  // Load Camoufox dynamically when first needed
-  if (!Camoufox) {
-    try {
-      const camoufoxModule = await import('camoufox');
-      Camoufox = camoufoxModule.Camoufox;
-    } catch (error) {
-      console.log(timeLog() + ' Error loading Camoufox: ' + error.message);
-      console.log(timeLog() + ' Make sure Camoufox is installed: npm install camoufox');
-      return false;
-    }
-  }
-  
   let browser;
+  let pythonProcess;
   await lock.acquire('key', async () => {
     let dir;
     let storageType = await state.storageType;
@@ -91,39 +138,21 @@ let launch = async function (name, profile){
       fs.writeFileSync(dir +'/fp.json', JSON.stringify(data));
     };
 
-    // Camoufox launch options
-    let launchOptions = {
-      headless: false,
-      data_dir: dir, // Use data_dir for persistent context
-      geoip: true, // Enable GeoIP for location-based configuration
-      humanize: true, // Enable human-like cursor movement
-      block_webrtc: true, // Block WebRTC to prevent IP leaks
+    // Build launch configuration
+    let launchConfig = {
+      profileDir: dir,
+      fingerprint: {}
     };
     
-    // Configure fingerprinting if enabled
+    // Load fingerprint configuration
     if (await profile.get('fingerprint') > false){
       let fpConfig = JSON.parse(fs.readFileSync(dir + '/fp.json'));
-      
-      // Apply fingerprint configuration to Camoufox
-      if (fpConfig.screen) {
-        launchOptions.screen = {
-          min_width: fpConfig.screen.minWidth || 1440,
-          min_height: fpConfig.screen.minHeight || 900,
-          max_width: fpConfig.screen.maxWidth || 1920,
-          max_height: fpConfig.screen.maxHeight || 1080,
-        };
-      }
-      
-      // Enable OS spoofing - select random OS from the list
-      if (fpConfig.os && fpConfig.os.length > 0) {
-        const randomOS = fpConfig.os[Math.floor(Math.random() * fpConfig.os.length)];
-        launchOptions.os = randomOS;
-      }
+      launchConfig.fingerprint = fpConfig;
     }
 
-    // Configure proxy if set
+    // Configure proxy
     let proxyType = await profile.get('proxyType');
-    if (!proxyType == false){
+    if (proxyType != false){
       let proxy = await profile.get('proxy');
       let login = proxy.split(':', -2);
       proxy = proxy.split(':', 2);
@@ -135,21 +164,24 @@ let launch = async function (name, profile){
         return false;
       }
 
-      // Set proxy for Camoufox
       let [username, password] = login.split(':');
-      launchOptions.proxy = {
+      launchConfig.proxy = {
         server: `${proxyType}://${proxy.join(":")}`,
+        username: username,
+        password: password
       };
-      
-      if (username && password) {
-        launchOptions.proxy.username = username;
-        launchOptions.proxy.password = password;
-      }
     }
 
-    // Launch Camoufox
+    // Launch Camoufox via Python bridge
     try {
-      browser = await Camoufox(launchOptions);
+      console.log(timeLog() + ` Launching Camoufox for profile ${name}...`);
+      const result = await launchCamoufox(launchConfig);
+      pythonProcess = result.process;
+      
+      // Connect to browser via Playwright
+      browser = await chromium.connectOverCDP(result.wsEndpoint);
+      
+      console.log(timeLog() + ` Camoufox connected for profile ${name}`);
     } catch (error) {
       console.log(timeLog() + ' Error launching Camoufox: ' + error.message);
       browser = false;
@@ -157,8 +189,16 @@ let launch = async function (name, profile){
     }
 
     browser.name = name;
+    browser._pythonProcess = pythonProcess;
+    
     browser.on('disconnected', async () => {
       console.log(timeLog() + `Profile ${name} closed`);
+      
+      // Kill Python process
+      if (pythonProcess && !pythonProcess.killed) {
+        pythonProcess.kill();
+      }
+      
       delete manage.active[name];
       switch(storageType){
         case 'Cloud':
@@ -174,7 +214,9 @@ let launch = async function (name, profile){
   if (browser == false)
     return false;
   
-  let page = await browser.newPage();
+  const contexts = browser.contexts();
+  const page = await contexts[0].newPage();
+  
   try{
     if (name.includes('Grass')){
       try {
@@ -183,22 +225,24 @@ let launch = async function (name, profile){
       catch (err){
         console.log(timeLog() + ' Bad proxy at ' + name);
         await browser.close();
-        page = false;
+        return false;
       }
     }
-    else
+    else {
       await page.goto('https://abrahamjuliot.github.io/creepjs/');
+    }
   }
   catch(err){
     await page.goto('https://google.com/');
   }
   
-  let pages = await browser.pages();
+  const pages = await contexts[0].pages();
   for (let i = 0; i < pages.length; i++){
     let url = pages[i].url();
-    if (url == 'about:blank')
+    if (url === 'about:blank')
       await pages[i].close();
-  };
+  }
+  
   return page;
 };
 
