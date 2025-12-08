@@ -1,9 +1,9 @@
-const fingerprint = require('./fingerprint');
-const db = require('./db');
-const browser = require('./browser');
-const utils = require('../utils');
-const fs = require('fs');
-const config = require('../config');
+import fingerprint from './fingerprint.js';
+import * as db from './db.js';
+import * as browser from './browser.js';
+import * as utils from '../utils.js';
+import fs from 'fs';
+import * as config from '../config.js';
 
 process.on('uncaughtException', (err) => {
     console.error(err);
@@ -177,13 +177,4 @@ let get_ProfilesNames = async function (){
 };
 
 
-module.exports.create_Profile = create_Profile;
-module.exports.open_Profile = open_Profile;
-module.exports.set_ProfileProxy = set_ProfileProxy;
-module.exports.active = active;
-module.exports.get_ProfilesNames = get_ProfilesNames;
-module.exports.delete_Profile = delete_Profile;
-module.exports.rename_Profile = rename_Profile;
-module.exports.change_ProfileFP = change_ProfileFP;
-module.exports.delete_ProfileFP = delete_ProfileFP;
-module.exports.delete_ProfileProxy = delete_ProfileProxy;
+export { create_Profile, open_Profile, set_ProfileProxy, active, get_ProfilesNames, delete_Profile, rename_Profile, change_ProfileFP, delete_ProfileFP, delete_ProfileProxy };

@@ -1,13 +1,19 @@
-const config = require('../config');
-const fs = require('fs');
-const path = require('path');
+import * as config from '../config.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let update_Profile, check_Profile, get_Profile, open_Profile, close_Profile, delete_Profile, get_Selected, get_Profiles, get_Engines;
 
 // Use local database if Google Sheets is not configured
 if (config.useGoogleSheets) {
     // Use Google Sheets backend
-    const { JWT } = require('google-auth-library');
-    const { GoogleSpreadsheet } = require('google-spreadsheet');
-    const { RateLimiter } = require("limiter");
+    const { JWT } = await import('google-auth-library');
+    const { GoogleSpreadsheet } = await import('google-spreadsheet');
+    const { RateLimiter } = await import('limiter');
 
     const auth = new JWT({
         email: config.googleEmail,
@@ -29,7 +35,7 @@ if (config.useGoogleSheets) {
         await sheet.loadHeaderRow(1);
     };
 
-    async function check_Profile(name){
+    check_Profile = async function(name){
         await limiter.removeTokens(4);
         await connect();
         let rows = await sheet.getRows();
@@ -41,7 +47,7 @@ if (config.useGoogleSheets) {
         return false;
     };
 
-    async function update_Profile(name, data){
+    update_Profile = async function(name, data){
         await limiter.removeTokens(5);
         await connect();
         let check = await check_Profile(name);
@@ -54,7 +60,7 @@ if (config.useGoogleSheets) {
         };  
     };
 
-    async function get_Profile(name){
+    get_Profile = async function(name){
         await limiter.removeTokens(4);
         await connect();
         let rows = await sheet.getRows();
@@ -65,7 +71,7 @@ if (config.useGoogleSheets) {
         return false;
     };
 
-    let open_Profile = async function(name){
+    open_Profile = async function(name){
         await limiter.removeTokens(4);
         await connect();
         let profile = await get_Profile(name);
@@ -73,7 +79,7 @@ if (config.useGoogleSheets) {
         await profile.save();
     };
 
-    let close_Profile = async function(name){
+    close_Profile = async function(name){
         await limiter.removeTokens(3);
         await connect();
         let profile = await get_Profile(name);
@@ -81,14 +87,14 @@ if (config.useGoogleSheets) {
         await profile.save();
     };
 
-    async function delete_Profile(name){
+    delete_Profile = async function(name){
         await limiter.removeTokens(2);
         let row = await get_Profile(name);
         if (row)
             await row.delete();
     };
 
-    let get_Profiles = async function(){
+    get_Profiles = async function(){
         await limiter.removeTokens(2);
         await connect();
         let arr = [];
@@ -99,7 +105,7 @@ if (config.useGoogleSheets) {
         return arr;
     };
 
-    async function get_Selected(){
+    get_Selected = async function(){
         await limiter.removeTokens(3);
         await connect();
         let res = [];
@@ -113,33 +119,25 @@ if (config.useGoogleSheets) {
         return res;
     };
 
-    function get_Engines(){
+    get_Engines = function(){
         const parentDir = path.resolve(__dirname, '..');
         const engines = fs.readdirSync(parentDir + '/engines');
         return engines;
     };
-
-    module.exports.update_Profile = update_Profile;
-    module.exports.check_Profile = check_Profile;
-    module.exports.get_Profile = get_Profile;
-    module.exports.open_Profile = open_Profile;
-    module.exports.close_Profile = close_Profile;
-    module.exports.delete_Profile = delete_Profile;
-    module.exports.get_Selected = get_Selected;
-    module.exports.get_Profiles = get_Profiles;
-    module.exports.get_Engines = get_Engines;
 } else {
     // Use local database backend
     console.log('Using local database mode (Google Sheets not configured)');
-    const localDB = require('./db-local');
+    const localDB = await import('./db-local.js');
     
-    module.exports.update_Profile = localDB.update_Profile;
-    module.exports.check_Profile = localDB.check_Profile;
-    module.exports.get_Profile = localDB.get_Profile;
-    module.exports.open_Profile = localDB.open_Profile;
-    module.exports.close_Profile = localDB.close_Profile;
-    module.exports.delete_Profile = localDB.delete_Profile;
-    module.exports.get_Selected = localDB.get_Selected;
-    module.exports.get_Profiles = localDB.get_Profiles;
-    module.exports.get_Engines = localDB.get_Engines;
+    update_Profile = localDB.update_Profile;
+    check_Profile = localDB.check_Profile;
+    get_Profile = localDB.get_Profile;
+    open_Profile = localDB.open_Profile;
+    close_Profile = localDB.close_Profile;
+    delete_Profile = localDB.delete_Profile;
+    get_Selected = localDB.get_Selected;
+    get_Profiles = localDB.get_Profiles;
+    get_Engines = localDB.get_Engines;
 }
+
+export { update_Profile, check_Profile, get_Profile, open_Profile, close_Profile, delete_Profile, get_Selected, get_Profiles, get_Engines };

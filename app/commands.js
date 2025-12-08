@@ -1,9 +1,13 @@
-const inquirer = require('inquirer');
-const utils = require('../utils');
-const manage = require('../scr/manage');
-const db = require('../scr/db');
-const fs = require('fs');
-const path = require('path');
+import inquirer from 'inquirer';
+import * as utils from '../utils.js';
+import * as manage from '../scr/manage.js';
+import * as db from '../scr/db.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let create_Profile = async function(){
     let name = false;
@@ -108,10 +112,4 @@ let setEngine = function(name){
     console.log(utils.timeLog() + 'Selected engine: ' + name);
 };
 
-module.exports.setNewProxy = setNewProxy;
-module.exports.rename_Profile = rename_Profile;
-module.exports.create_Profile = create_Profile;
-module.exports.openSelected = openSelected;
-module.exports.deleteSelected = deleteSelected;
-module.exports.newEngine = newEngine;
-module.exports.setEngine = setEngine;
+export { setNewProxy, rename_Profile, create_Profile, openSelected, deleteSelected, newEngine, setEngine };

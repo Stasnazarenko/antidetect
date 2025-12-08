@@ -22,4 +22,4 @@ let get_Fingerprint = async function(){
   return JSON.stringify(fingerprint);
 };
 
-module.exports = get_Fingerprint;
+export default get_Fingerprint;
