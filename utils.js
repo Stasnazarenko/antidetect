@@ -4,7 +4,8 @@ import * as db from './scr/db.js';
 // State object to hold mutable properties
 const state = {
   storageType: undefined,
-  engine: 'main'
+  engine: 'main',
+  dashboard: undefined
 };
 
 function printLogo(){
