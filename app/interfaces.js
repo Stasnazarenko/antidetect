@@ -1,9 +1,9 @@
-const inquirer = require('inquirer');
-const manage = require('../scr/manage');
-const utils = require('../utils');
-const db = require('../scr/db');
-const commands = require('./commands');
-const config = require('../config');
+import inquirer from 'inquirer';
+import * as manage from '../scr/manage.js';
+import * as utils from '../utils.js';
+import * as db from '../scr/db.js';
+import * as commands from './commands.js';
+import * as config from '../config.js';
 
 let start = async function(){
     console.clear();
@@ -400,6 +400,6 @@ let fp_Profile = async function(name){
 };
 
 
-module.exports.start = start;
+export { start };
 
 

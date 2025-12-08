@@ -5,8 +5,12 @@
  * Tests local mode without requiring Google Sheets
  */
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Test colors
 const colors = {
@@ -40,11 +44,11 @@ async function runTests() {
     // Test 1: Check if required dependencies are installed
     testInfo('Test 1: Checking dependencies...');
     try {
-        require('dotenv');
-        require('inquirer');
-        require('axios');
-        require('async-lock');
-        testPass('All required CommonJS dependencies are installed');
+        await import('dotenv/config');
+        await import('inquirer');
+        await import('axios');
+        await import('async-lock');
+        testPass('All required ESM dependencies are installed');
     } catch (error) {
         testFail(`Missing dependency: ${error.message}`);
     }
@@ -65,7 +69,7 @@ async function runTests() {
     // Test 3: Check config module
     testInfo('Test 3: Checking configuration...');
     try {
-        const config = require('./config');
+        const config = await import('./config.js');
         if (config.useGoogleSheets === false) {
             testPass('Config correctly detects local mode');
         } else if (config.useGoogleSheets === true) {
@@ -81,7 +85,7 @@ async function runTests() {
     // Test 4: Check local database module
     testInfo('Test 4: Checking local database...');
     try {
-        const dbLocal = require('./scr/db-local');
+        const dbLocal = await import('./scr/db-local.js');
         if (typeof dbLocal.check_Profile === 'function' &&
             typeof dbLocal.update_Profile === 'function' &&
             typeof dbLocal.get_Profile === 'function') {
@@ -96,7 +100,7 @@ async function runTests() {
     // Test 5: Check db module switches correctly
     testInfo('Test 5: Checking database module switching...');
     try {
-        const db = require('./scr/db');
+        const db = await import('./scr/db.js');
         if (typeof db.check_Profile === 'function' &&
             typeof db.update_Profile === 'function' &&
             typeof db.get_Profile === 'function') {
@@ -111,7 +115,8 @@ async function runTests() {
     // Test 6: Check fingerprint module
     testInfo('Test 6: Checking fingerprint module...');
     try {
-        const fingerprint = require('./scr/fingerprint');
+        const fingerprintModule = await import('./scr/fingerprint.js');
+        const fingerprint = fingerprintModule.default;
         if (typeof fingerprint === 'function') {
             testPass('Fingerprint module exports generator function');
             
@@ -136,7 +141,7 @@ async function runTests() {
     // Test 7: Check browser module structure
     testInfo('Test 7: Checking browser module...');
     try {
-        const browser = require('./scr/browser');
+        const browser = await import('./scr/browser.js');
         if (typeof browser.launch === 'function') {
             testPass('Browser module exports launch function');
         } else {
@@ -163,7 +168,7 @@ async function runTests() {
     // Test 9: Test local database operations
     testInfo('Test 9: Testing local database operations...');
     try {
-        const db = require('./scr/db');
+        const db = await import('./scr/db.js');
         
         // Create test profile
         const testProfileName = 'test_profile_' + Date.now();

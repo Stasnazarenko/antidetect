@@ -1,6 +1,10 @@
-const fs = require('fs');
-const path = require('path');
-const config = require('../config');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import * as config from '../config.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Local JSON database file
 const DB_FILE = path.join(__dirname, '..', 'storage', 'profiles.json');
@@ -141,12 +145,4 @@ function get_Engines() {
     return fs.readdirSync(enginesDir);
 }
 
-module.exports.update_Profile = update_Profile;
-module.exports.check_Profile = check_Profile;
-module.exports.get_Profile = get_Profile;
-module.exports.open_Profile = open_Profile;
-module.exports.close_Profile = close_Profile;
-module.exports.delete_Profile = delete_Profile;
-module.exports.get_Selected = get_Selected;
-module.exports.get_Profiles = get_Profiles;
-module.exports.get_Engines = get_Engines;
+export { update_Profile, check_Profile, get_Profile, open_Profile, close_Profile, delete_Profile, get_Selected, get_Profiles, get_Engines };

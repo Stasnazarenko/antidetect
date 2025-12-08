@@ -1,14 +1,15 @@
-const config = require('../config');
-const utils = require('../utils');
-const db = require('./db');
-const fs = require('fs');
-const manage = require('./manage');
-const fingerprint = require('./fingerprint');
-const AsyncLock = require('async-lock');
+import * as config from '../config.js';
+import * as utils from '../utils.js';
+import * as db from './db.js';
+import fs from 'fs';
+import * as manage from './manage.js';
+import fingerprint from './fingerprint.js';
+import AsyncLock from 'async-lock';
+import axios from 'axios';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+import path from 'path';
+
 const lock = new AsyncLock();
-const axios = require('axios');
-const {SocksProxyAgent} = require('socks-proxy-agent');
-const path = require('path');
 
 // Camoufox will be loaded dynamically when needed (it's an ES module)
 let Camoufox = null;
@@ -201,7 +202,7 @@ let launch = async function (name, profile){
   return page;
 };
 
-module.exports.launch = launch;
+export { launch };
 
 
 
