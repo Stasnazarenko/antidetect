@@ -131,6 +131,31 @@ For cloud integration, you need a service that provides a virtual disk, displayi
 
 ## Installation and guides
 
+### Prerequisites
+
+1. **Python 3.8+** with Camoufox:
+   ```bash
+   pip install camoufox
+   ```
+
+2. **Node.js 18+** with dependencies:
+   ```bash
+   npm install
+   ```
+
+### Verify Camoufox installation
+
+```bash
+camoufox fetch
+# or
+python3 -m camoufox fetch
+```
+
+You should see:
+```
+Pip package:    v0.4.12
+Camoufox:       v142.0.1-fork.26 (Up to date!)
+```
 
 ### Step 1: Google spreadsheet
 
@@ -234,24 +259,24 @@ In local mode:
 
 ## How to Start
 
-1. Node JS (version 16 or higher)
-2. Clone the repository to your disk
-3. **Optional**: Configure `.env` with Google Sheets parameters (or leave empty for local mode)
-4. Launch the console (for example, Windows PowerShell, Terminal on macOS)
-5. Specify the working directory where you have uploaded the repository in the console using the CD command
+1. **Python 3.8+** with Camoufox installed:
+   ```bash
+   pip install camoufox
+   python3 -m camoufox fetch
+   ```
+2. **Node.js** (version 18 or higher)
+3. Clone the repository to your disk
+4. **Optional**: Configure `.env` with Google Sheets parameters (or leave empty for local mode)
+5. Launch the console (for example, Windows PowerShell, Terminal on macOS)
+6. Specify the working directory where you have uploaded the repository in the console using the CD command
     ```
     cd C:\Program Files\brothers
     ```
-6. Install packages
+7. Install Node.js packages
    
     ```
     npm install
     ```
-7. **Optional but Recommended**: Download Camoufox browser binaries
-    ```
-    npx camoufox fetch
-    ```
-    Note: This step may fail in restricted environments. If it fails, Camoufox will attempt to download automatically on first use.
 
 8. Run the software
     ```
