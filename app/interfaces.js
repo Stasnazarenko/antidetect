@@ -1,13 +1,13 @@
 import inquirer from 'inquirer';
 import * as manage from '../scr/manage.js';
-import * as utils from '../utils.js';
+import { printLogo, timeLog, state } from '../utils.js';
 import * as db from '../scr/db.js';
 import * as commands from './commands.js';
 import * as config from '../config.js';
 
 let start = async function(){
     console.clear();
-    utils.printLogo();
+    printLogo();
     
     // Build menu choices based on configuration
     let menuChoices = [
@@ -29,7 +29,7 @@ let start = async function(){
     
     // Show storage mode info
     if (!config.useGoogleSheets) {
-        console.log(utils.timeLog() + 'Running in LOCAL MODE (no Google Sheets integration)');
+        console.log(timeLog() + 'Running in LOCAL MODE (no Google Sheets integration)');
     }
     
     inquirer.prompt([
@@ -38,7 +38,7 @@ let start = async function(){
       pageSize: 20,
       name: 'section',
       message: 'Select a section:',
-      prefix: utils.timeLog(),
+      prefix: timeLog(),
       choices: menuChoices,
     }
     ]).then(async (answers) => {
@@ -66,7 +66,7 @@ let multiprocessing = async function(){
           pageSize: 20,
           name: 'multiprocessing',
           message: 'Select a menu item:',
-          prefix: utils.timeLog(),
+          prefix: timeLog(),
           choices: choices,
         }
     ]).then(async (answers) => {
@@ -89,7 +89,7 @@ let dashboard = async function(){
           pageSize: 20,
           name: 'dashboard',
           message: 'Select a menu item:',
-          prefix: utils.timeLog(),
+          prefix: timeLog(),
           choices: [
             new inquirer.Separator(), 
             'Connect', 
@@ -100,9 +100,9 @@ let dashboard = async function(){
     ]).then(async (answers) => {
         switch(answers.dashboard){
             case 'Connect':
-                console.log(`${utils.timeLog()}`+
+                console.log(`${timeLog()}`+
                 'A link for authorization in the Google API will be sent shortly. Please log in with the account that owns the spreadsheet to obtain a service account token for interaction with the Google API through your application.')
-                utils.dashboard = 'Cloud';
+                state.dashboard = 'Cloud';
                 break;
             case 'Back':
                 return start();
@@ -114,7 +114,7 @@ let dashboard = async function(){
 let storage_Type = async function(){
     // If Google Sheets is not configured, force Local mode
     if (!config.useGoogleSheets) {
-        utils.storageType = 'Local';
+        state.storageType = 'Local';
         return profiles_Menu();
     }
     
@@ -124,7 +124,7 @@ let storage_Type = async function(){
           pageSize: 20,
           name: 'storageType',
           message: 'Select a type of storage:',
-          prefix: utils.timeLog(),
+          prefix: timeLog(),
           choices: [
             new inquirer.Separator(), 
             'Cloud', 
@@ -136,10 +136,10 @@ let storage_Type = async function(){
     ]).then(async (answers) => {
         switch(answers.storageType){
             case 'Cloud':
-                utils.storageType = 'Cloud';
+                state.storageType = 'Cloud';
                 break;
             case 'Local':
-                utils.storageType = 'Local';
+                state.storageType = 'Local';
                 break;
             case 'Back':
                 return start();
@@ -155,7 +155,7 @@ let profiles_Menu = async function(){
           pageSize: 20,
           name: 'profileAction',
           message: 'Select a menu item:',
-          prefix: utils.timeLog(),
+          prefix: timeLog(),
           choices: [
             new inquirer.Separator(), 
             'New profile', 
@@ -193,7 +193,7 @@ let profiles = async function(){
       pageSize: 20,
       name: 'profile',
       message: 'Select a profile:',
-      prefix: utils.timeLog(),
+      prefix: timeLog(),
       choices: names,
     }]).then(async (answers) => {
         switch(answers.profile){
@@ -209,8 +209,8 @@ let selected_Actions = async function(){
         type: 'list',
         name: 'action',
         message: 'Select an action:',
-        prefix: utils.timeLog(),
-        choices: [ 
+        prefix: timeLog(),
+        choices: [
             new inquirer.Separator(), 
             'Open selected profiles',
             'Delete selected profiles',
@@ -261,8 +261,8 @@ IP: ${proxy}\n`;
       name: 'action',
       pageSize: 31,
       message: message + 'Select an action:',
-      prefix: utils.timeLog(),
-      choices: [ 
+      prefix: timeLog(),
+      choices: [
         new inquirer.Separator(),
         'Open', 
         'Proxy', 
@@ -308,7 +308,7 @@ let proxy_Profile = async function(name){
     let proxyType = await fpdata.get('proxyType');
     let message;
     if (proxy == false || proxy == undefined){
-        message = `Proxy: false. The real ip\n${utils.timeLog()} Select an action:`
+        message = `Proxy: false. The real ip\n${timeLog()} Select an action:`
     }
     else {
         let ip = proxy.split(":");
@@ -316,14 +316,14 @@ let proxy_Profile = async function(name){
         message = `Proxy: True.
 Type: ${proxyType}
 IP: ${proxy}
-${utils.timeLog()} Select an action:`;
+${timeLog()} Select an action:`;
     };
     await inquirer.prompt([{
         type: 'list',
         name: 'action',
         message: message,
-        prefix: utils.timeLog(),
-        choices: [ 
+        prefix: timeLog(),
+        choices: [
             new inquirer.Separator(), 
             'Set new proxy',
             'Delete proxy',
@@ -352,9 +352,9 @@ let fp_Profile = async function(name){
         inquirer.prompt([{
             type: 'list',
             name: 'action',
-            message: `Fingerprint: False\n${utils.timeLog()} Select an action:`,
-            prefix: utils.timeLog(),
-            choices: [ 
+            message: `Fingerprint: False\n${timeLog()} Select an action:`,
+            prefix: timeLog(),
+            choices: [
                 new inquirer.Separator(), 
                 'Set new fingerprint',
                 new inquirer.Separator(), 
@@ -362,7 +362,7 @@ let fp_Profile = async function(name){
             ]}]).then(async (answers) => {
             if (answers.action == "Set new fingerprint"){
                 await manage.change_ProfileFP(name);
-                console.log(utils.timeLog() + ' Fingerprint set');
+                console.log(timeLog() + ' Fingerprint set');
                 return profile_Action(name);
             };
             if (answers.action == "Back")
@@ -373,9 +373,9 @@ let fp_Profile = async function(name){
         inquirer.prompt([{
             type: 'list',
             name: 'action',
-            message: `Fingerprint: True\n${utils.timeLog()} Select an action:`,
-            prefix: utils.timeLog(),
-            choices: [ 
+            message: `Fingerprint: True\n${timeLog()} Select an action:`,
+            prefix: timeLog(),
+            choices: [
                 new inquirer.Separator(), 
               'Change fingerprint',
               'Delete fingerprint',
@@ -385,12 +385,12 @@ let fp_Profile = async function(name){
         }]).then(async (answers) => {
             if (answers.action == "Change fingerprint"){
                 await manage.change_ProfileFP(name);
-                console.log(utils.timeLog() + ' Fingerprint changed');
+                console.log(timeLog() + ' Fingerprint changed');
                 return profile_Action(name);
             };
             if (answers.action == "Delete fingerprint"){
                 await manage.delete_ProfileFP(name);
-                console.log(utils.timeLog() + ' Fingerprint deleted');
+                console.log(timeLog() + ' Fingerprint deleted');
                 return profile_Action(name);
             };
             if (answers.action == "Back")

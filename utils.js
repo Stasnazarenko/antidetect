@@ -1,8 +1,11 @@
 import figlet from 'figlet';
 import * as db from './scr/db.js';
 
-let storageType;
-let engine = 'main';
+// State object to hold mutable properties
+const state = {
+  storageType: undefined,
+  engine: 'main'
+};
 
 function printLogo(){
   return console.log(figlet.textSync('bro.dev', {
@@ -35,4 +38,4 @@ function timeLog(){
   return `${hours}:${minutes}:${seconds} >>> `;
 }
 
-export { printLogo, menu, timeLog, storageType, engine };
+export { printLogo, menu, timeLog, state };

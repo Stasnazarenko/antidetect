@@ -1,5 +1,5 @@
 import * as config from '../config.js';
-import * as utils from '../utils.js';
+import { timeLog, state } from '../utils.js';
 import * as db from './db.js';
 import fs from 'fs';
 import * as manage from './manage.js';
@@ -64,8 +64,8 @@ let launch = async function (name, profile){
       const camoufoxModule = await import('camoufox');
       Camoufox = camoufoxModule.Camoufox;
     } catch (error) {
-      console.log(utils.timeLog() + ' Error loading Camoufox: ' + error.message);
-      console.log(utils.timeLog() + ' Make sure Camoufox is installed: npm install camoufox');
+      console.log(timeLog() + ' Error loading Camoufox: ' + error.message);
+      console.log(timeLog() + ' Make sure Camoufox is installed: npm install camoufox');
       return false;
     }
   }
@@ -73,7 +73,7 @@ let launch = async function (name, profile){
   let browser;
   await lock.acquire('key', async () => {
     let dir;
-    let storageType = await utils.storageType;
+    let storageType = await state.storageType;
     switch(storageType){
       case 'Cloud':
         dir = config.cloudDir + `profiles/${name}`;
@@ -130,10 +130,10 @@ let launch = async function (name, profile){
       login = login[2] + ':' + login[3];
       let check = await proxyChecker(proxyType, proxy.join(":"), login);
       if (check == false){
-        console.log(utils.timeLog() + ' Bad proxy at ' + name);
+        console.log(timeLog() + ' Bad proxy at ' + name);
         browser =  false;
         return false;
-      } 
+      }
 
       // Set proxy for Camoufox
       let [username, password] = login.split(':');
@@ -151,14 +151,14 @@ let launch = async function (name, profile){
     try {
       browser = await Camoufox(launchOptions);
     } catch (error) {
-      console.log(utils.timeLog() + ' Error launching Camoufox: ' + error.message);
+      console.log(timeLog() + ' Error launching Camoufox: ' + error.message);
       browser = false;
       return false;
     }
 
     browser.name = name;
     browser.on('disconnected', async () => {
-      console.log(utils.timeLog() + `Profile ${name} closed`);
+      console.log(timeLog() + `Profile ${name} closed`);
       delete manage.active[name];
       switch(storageType){
         case 'Cloud':
@@ -181,7 +181,7 @@ let launch = async function (name, profile){
         await page.goto('https://app.getgrass.io/dashboard');
       }
       catch (err){
-        console.log(utils.timeLog() + ' Bad proxy at ' + name);
+        console.log(timeLog() + ' Bad proxy at ' + name);
         await browser.close();
         page = false;
       }
