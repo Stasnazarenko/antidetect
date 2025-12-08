@@ -152,7 +152,7 @@ let launch = async function (name, profile){
 
     // Configure proxy
     let proxyType = await profile.get('proxyType');
-    if (!proxyType == false){
+    if (proxyType != false){
       let proxy = await profile.get('proxy');
       let login = proxy.split(':', -2);
       proxy = proxy.split(':', 2);

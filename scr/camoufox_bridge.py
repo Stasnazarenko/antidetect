@@ -6,6 +6,7 @@ Launches Camoufox with fingerprint configuration and returns Playwright connecti
 import sys
 import json
 import asyncio
+import random
 from camoufox.async_api import Camoufox
 
 async def launch_browser(config):
@@ -51,12 +52,10 @@ async def launch_browser(config):
     
     if fingerprint.get('os'):
         # Pick random OS from list
-        import random
         camoufox_config['os'] = random.choice(fingerprint['os'])
     
     if fingerprint.get('hardwareConcurrency'):
         hc = fingerprint['hardwareConcurrency']
-        import random
         camoufox_config['hardwareConcurrency'] = random.randint(
             hc.get('min', 2), 
             hc.get('max', 16)
