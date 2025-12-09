@@ -1,15 +1,18 @@
-const config = require('../config');
-const utils = require('../utils');
-const db = require('./db');
-const { plugin } = require('playwright-with-fingerprints');
-const fs = require('fs');
-const manage = require('./manage');
-const fingerprint = require('./fingerprint');
-const AsyncLock = require('async-lock');
+import * as config from '../config.js';
+import { timeLog, state } from '../utils.js';
+import * as db from './db.js';
+import fs from 'fs';
+import * as manage from './manage.js';
+import fingerprint from './fingerprint.js';
+import AsyncLock from 'async-lock';
+import axios from 'axios';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+import path from 'path';
+import { spawn } from 'child_process';
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'url';
+
 const lock = new AsyncLock();
-const axios = require('axios');
-const {SocksProxyAgent} = require('socks-proxy-agent');
-const path = require('path');
 
 
 let proxyChecker = async function (type, proxy, auth){
@@ -54,20 +57,70 @@ let proxyChecker = async function (type, proxy, auth){
     return false;
 };
 
-let engine = function() {
-  plugin.setRequestTimeout(120 * 60000);
-  let dir = path.resolve(__dirname, '..') + '/engines/' + utils.engine;
-  if (utils.engine != 'main')
-    plugin.setWorkingFolder(dir);
-  else  
-    plugin.setWorkingFolder('./data');
-};
+/**
+ * Launch Camoufox browser via Python bridge
+ */
+async function launchCamoufox(launchConfig) {
+  return new Promise((resolve, reject) => {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const pythonScript = path.join(__dirname, 'camoufox_bridge.py');
+    const configJson = JSON.stringify(launchConfig);
+    
+    const pythonProcess = spawn('python3', [pythonScript, configJson], {
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    pythonProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+      
+      // Try to parse connection info
+      try {
+        const lines = stdout.split('\n');
+        for (const line of lines) {
+          if (line.trim().startsWith('{')) {
+            const result = JSON.parse(line);
+            if (result.success && result.wsEndpoint) {
+              resolve({
+                wsEndpoint: result.wsEndpoint,
+                process: pythonProcess
+              });
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        // Continue accumulating output
+      }
+    });
+    
+    pythonProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+    
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Python bridge failed: ${stderr || stdout}`));
+      }
+    });
+    
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      pythonProcess.kill();
+      reject(new Error('Camoufox launch timeout'));
+    }, 30000);
+  });
+}
 
 let launch = async function (name, profile){
   let browser;
+  let pythonProcess;
   await lock.acquire('key', async () => {
     let dir;
-    let storageType = await utils.storageType;
+    let storageType = await state.storageType;
     switch(storageType){
       case 'Cloud':
         dir = config.cloudDir + `profiles/${name}`;
@@ -85,61 +138,67 @@ let launch = async function (name, profile){
       fs.writeFileSync(dir +'/fp.json', JSON.stringify(data));
     };
 
-    engine();
-    let options = {
-      profile: {},
-      proxy: {
-        changeTimezone: true,
-        changeGeolocation: true,
-        changeBrowserLanguage: true,
-      }
+    // Build launch configuration
+    let launchConfig = {
+      profileDir: dir,
+      fingerprint: {}
     };
     
+    // Load fingerprint configuration
     if (await profile.get('fingerprint') > false){
-      let fp = JSON.stringify(JSON.parse(fs.readFileSync(dir + '/fp.json')));
-      plugin.useFingerprint(fp, {    
-        // safeElementSize: true,
-        emulateSensorAPI: false,
-      });
+      let fpConfig = JSON.parse(fs.readFileSync(dir + '/fp.json'));
+      launchConfig.fingerprint = fpConfig;
     }
-    else 
-      options.profile.loadFingerprint = false;
 
+    // Configure proxy
     let proxyType = await profile.get('proxyType');
-    if (!proxyType == false){
+    if (proxyType != false){
       let proxy = await profile.get('proxy');
       let login = proxy.split(':', -2);
       proxy = proxy.split(':', 2);
       login = login[2] + ':' + login[3];
       let check = await proxyChecker(proxyType, proxy.join(":"), login);
       if (check == false){
-        console.log(utils.timeLog() + ' Bad proxy at ' + name);
+        console.log(timeLog() + ' Bad proxy at ' + name);
         browser =  false;
         return false;
-      } 
+      }
 
-      plugin.useProxy(`${proxyType}://${login}:${proxy.join(":")}`, 
-        options.proxy);
+      let [username, password] = login.split(':');
+      launchConfig.proxy = {
+        server: `${proxyType}://${proxy.join(":")}`,
+        username: username,
+        password: password
+      };
     }
-    else 
-      options.profile.loadProxy = false;
 
-    plugin.useProfile(dir, options.profile);
-  
-    browser = await plugin.launchPersistentContext(dir, {
-      headless: false,
-      ignoreDefaultArgs: ["--enable-automation", `--allow-file-access-from-files`],
-      // args: [
-      //   `--disable-extensions-except=E:/farm/antidetect/extentions/phantom`,
-      //   `--load-extension=E:/farm/antidetect/extentions/phantom`
-      // ]
+    // Launch Camoufox via Python bridge
+    try {
+      console.log(timeLog() + ` Launching Camoufox for profile ${name}...`);
+      const result = await launchCamoufox(launchConfig);
+      pythonProcess = result.process;
       
-    });
+      // Connect to browser via Playwright
+      browser = await chromium.connectOverCDP(result.wsEndpoint);
+      
+      console.log(timeLog() + ` Camoufox connected for profile ${name}`);
+    } catch (error) {
+      console.log(timeLog() + ' Error launching Camoufox: ' + error.message);
+      browser = false;
+      return false;
+    }
 
     browser.name = name;
-    browser.on('close', async data => {
-      let name = data.name;
-      console.log(utils.timeLog() + `Profile ${name} closed`);
+    browser._pythonProcess = pythonProcess;
+    
+    browser.on('disconnected', async () => {
+      console.log(timeLog() + `Profile ${name} closed`);
+      
+      // Kill Python process
+      if (pythonProcess && !pythonProcess.killed) {
+        pythonProcess.kill();
+      }
+      
       delete manage.active[name];
       switch(storageType){
         case 'Cloud':
@@ -151,42 +210,43 @@ let launch = async function (name, profile){
       };
     });  
   });
+  
   if (browser == false)
     return false;
   
-  let page = await browser.newPage();
+  const contexts = browser.contexts();
+  const page = await contexts[0].newPage();
+  
   try{
     if (name.includes('Grass')){
       try {
         await page.goto('https://app.getgrass.io/dashboard');
       }
       catch (err){
-        console.log(utils.timeLog() + ' Bad proxy at ' + name);
+        console.log(timeLog() + ' Bad proxy at ' + name);
         await browser.close();
-        page = false;
+        return false;
       }
-      // let page2 = await browser.newPage();
-      // await page2.goto('https://chromewebstore.google.com/detail/ilehaonighjijnmpnagapkhpcdbhclfg/');
-      // let page = await browser.newPage();
-      // await page.goto('https://www.google.com/search?q=' + name);
     }
-    else
+    else {
       await page.goto('https://abrahamjuliot.github.io/creepjs/');
+    }
   }
   catch(err){
     await page.goto('https://google.com/');
   }
-  let pages = browser.pages();
+  
+  const pages = await contexts[0].pages();
   for (let i = 0; i < pages.length; i++){
     let url = pages[i].url();
-    if (url == 'about:blank')
-      pages[i].close();
-  };
+    if (url === 'about:blank')
+      await pages[i].close();
+  }
+  
   return page;
 };
 
-module.exports.launch = launch;
-
+export { launch };
 
 
 

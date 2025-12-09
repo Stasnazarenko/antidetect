@@ -1,9 +1,9 @@
-const fingerprint = require('./fingerprint');
-const db = require('./db');
-const browser = require('./browser');
-const utils = require('../utils');
-const fs = require('fs');
-const config = require('../config');
+import fingerprint from './fingerprint.js';
+import * as db from './db.js';
+import * as browser from './browser.js';
+import { timeLog, state } from '../utils.js';
+import fs from 'fs';
+import * as config from '../config.js';
 
 process.on('uncaughtException', (err) => {
     console.error(err);
@@ -19,7 +19,7 @@ async function saveFP(dir){
 
 let create_Profile = async function (name, options) {
     let dir;
-    let storageType = await utils.storageType;
+    let storageType = await state.storageType;
     switch(storageType){
       case 'Cloud':
         dir = config.cloudDir + `profiles/${name}`;
@@ -29,7 +29,7 @@ let create_Profile = async function (name, options) {
         break;
     };
     if (fs.existsSync(dir))
-        return console.log(utils.timeLog() + 
+        return console.log(timeLog() + 
         ` Profile's folder ${name} already created. If you want to create new profile ${name} then delete folder ${name} in ${config.cloudDir + 'profiles'}.`);
     fs.mkdirSync(dir, { recursive: true });
     let profile = {
@@ -43,20 +43,20 @@ let create_Profile = async function (name, options) {
         profile.fingerprint = true;
     };
     await db.update_Profile(name, profile);
-    return console.log(utils.timeLog() + ` Profile ${name} created`);
+    return console.log(timeLog() + ` Profile ${name} created`);
 };
 
 let open_Profile = async function (name){
     let check = await db.check_Profile(name);
     if (!check)
-        return console.log(utils.timeLog() + ` Profile ${name} is not exist`);
+        return console.log(timeLog() + ` Profile ${name} is not exist`);
     let profile = await db.get_Profile(name);
     check = await profile.get('open');
     if (check == true && check != undefined)
-        return console.log(utils.timeLog() + ` Profile ${name} already open`);
-    console.log(utils.timeLog() + ` Opening profile ${name}...`);
+        return console.log(timeLog() + ` Profile ${name} already open`);
+    console.log(timeLog() + ` Opening profile ${name}...`);
     let dir;
-    let storageType = await utils.storageType;
+    let storageType = await state.storageType;
     switch(storageType){
       case 'Cloud':
         dir = config.cloudDir + `profiles/${name}`;
@@ -74,7 +74,7 @@ let open_Profile = async function (name){
         return false;
     await db.open_Profile(name);
     active[name] = page;
-    console.log(utils.timeLog() + ` Profile ${name} open`);
+    console.log(timeLog() + ` Profile ${name} open`);
     return page;
 };
 
@@ -95,7 +95,7 @@ let delete_ProfileProxy = async function (name){
 
 let change_ProfileFP = async function (name){
     let profileData = {};
-    let storageType = await utils.storageType;
+    let storageType = await state.storageType;
     let dir;
     switch(storageType){
         case 'Cloud':
@@ -117,10 +117,10 @@ let delete_ProfileFP = async function (name){
     await db.update_Profile(name, profileData);
     try {
         fs.rmSync(dir + '/fingerprint.json', { recursive: true });
-        console.log(utils.timeLog() + ` Profile ${name}. Fingerprint is deleted`);
+        console.log(timeLog() + ` Profile ${name}. Fingerprint is deleted`);
     }
     catch (error) {
-        console.log(utils.timeLog() + ' Fingerprint delete error');
+        console.log(timeLog() + ' Fingerprint delete error');
     };
 };
 
@@ -147,10 +147,10 @@ let rename_Profile = async function (name, newName){
     await db.update_Profile(name, profileData);
     try {
         fs.renameSync(`${dir + name}`, `${dir + newName}`);
-        console.log(utils.timeLog() + ' Profile renamed');
+        console.log(timeLog() + ' Profile renamed');
     } 
     catch (error) {
-        console.log(utils.timeLog() + ' Rename error');
+        console.log(timeLog() + ' Rename error');
     };
 };
 
@@ -159,12 +159,12 @@ let delete_Profile = async function (name) {
     await db.delete_Profile(name);
     try {
         fs.rmSync(dir, { recursive: true });
-        console.log(utils.timeLog() + ` Profile ${name} is deleted`);
+        console.log(timeLog() + ` Profile ${name} is deleted`);
     } 
     catch (err) {
-        console.error(utils.timeLog() + ` Error while deleting profile ${name}`);
+        console.error(timeLog() + ` Error while deleting profile ${name}`);
     };
-    // console.log(utils.timeLog() + ' The profile folder is saved on the cloud, to completely delete the profile, delete the profile folder from the shared profile storage');
+    // console.log(timeLog() + ' The profile folder is saved on the cloud, to completely delete the profile, delete the profile folder from the shared profile storage');
 };
 
 let get_ProfilesNames = async function (){
@@ -177,13 +177,4 @@ let get_ProfilesNames = async function (){
 };
 
 
-module.exports.create_Profile = create_Profile;
-module.exports.open_Profile = open_Profile;
-module.exports.set_ProfileProxy = set_ProfileProxy;
-module.exports.active = active;
-module.exports.get_ProfilesNames = get_ProfilesNames;
-module.exports.delete_Profile = delete_Profile;
-module.exports.rename_Profile = rename_Profile;
-module.exports.change_ProfileFP = change_ProfileFP;
-module.exports.delete_ProfileFP = delete_ProfileFP;
-module.exports.delete_ProfileProxy = delete_ProfileProxy;
+export { create_Profile, open_Profile, set_ProfileProxy, active, get_ProfilesNames, delete_Profile, rename_Profile, change_ProfileFP, delete_ProfileFP, delete_ProfileProxy };
