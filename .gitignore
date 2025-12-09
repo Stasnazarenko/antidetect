@@ -1,6 +1,7 @@
 # Environment variables
 .env
 .idea/
+profiles
 
 # Node modules
 node_modules/
