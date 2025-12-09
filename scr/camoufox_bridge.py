@@ -1,10 +1,10 @@
-# scr/camoufox_bridge.py
 import sys
 import json
 import traceback
 import asyncio
 import os
-from camoufox.async_api import AsyncCamoufox  # type: ignore
+from camoufox.async_api import AsyncCamoufox
+from browserforge.fingerprints import Screen
 
 
 def safe_print_json(obj: dict) -> None:
@@ -18,9 +18,18 @@ def safe_print_json(obj: dict) -> None:
 
 async def launch_browser(launch_config: dict) -> dict:
     """Запускає браузер з конфігурацією"""
+    camoufox_manager = None
+
     try:
         # Витягуємо fingerprint з конфігу
         fingerprint_config = launch_config.pop("fingerprint", None)
+
+        # Витягуємо profile path (якщо є)
+        profile_path = None
+        if "user_data_dir" in launch_config:
+            profile_path = launch_config.pop("user_data_dir")
+        elif "profileDir" in launch_config:
+            profile_path = launch_config.pop("profileDir")
 
         # Встановлюємо дефолтні значення
         if "headless" not in launch_config:
@@ -29,23 +38,34 @@ async def launch_browser(launch_config: dict) -> dict:
         if "timeout" not in launch_config:
             launch_config["timeout"] = 120000
 
+        # Обробляємо fingerprint параметри - додаємо безпосередньо до launch_config
+        if fingerprint_config:
+            # Screen - створюємо Screen об'єкт
+            if "screen" in fingerprint_config:
+                screen_data = fingerprint_config["screen"]
+                if "minWidth" in screen_data and "maxWidth" in screen_data:
+                    launch_config["screen"] = Screen(
+                        min_width=screen_data["minWidth"],
+                        max_width=screen_data["maxWidth"],
+                        min_height=screen_data["minHeight"],
+                        max_height=screen_data["maxHeight"]
+                    )
+
+            # OS
+            if "os" in fingerprint_config:
+                launch_config["os"] = fingerprint_config["os"]
+
+            # GeoIP
+            if "geoip" in fingerprint_config:
+                launch_config["geoip"] = fingerprint_config["geoip"]
+
         safe_print_json({
             "debug": True,
             "message": "Starting browser launch...",
-            "config": launch_config,
-            "fingerprint": fingerprint_config
+            "config": {k: str(v) if not isinstance(v, (str, int, bool, list, dict, type(None))) else v
+                       for k, v in launch_config.items()},
+            "profile_path": profile_path
         })
-
-        # Якщо є fingerprint, передаємо його параметри окремо
-        if fingerprint_config:
-            if "screen" in fingerprint_config:
-                launch_config.update(fingerprint_config["screen"])
-            if "os" in fingerprint_config:
-                launch_config["os"] = fingerprint_config["os"]
-            if "geoip" in fingerprint_config:
-                launch_config["geoip"] = fingerprint_config["geoip"]
-            if "hardwareConcurrency" in fingerprint_config:
-                launch_config["hardware_concurrency"] = fingerprint_config["hardwareConcurrency"]
 
         camoufox_manager = AsyncCamoufox(**launch_config)
         browser = await asyncio.wait_for(
@@ -75,10 +95,10 @@ async def launch_browser(launch_config: dict) -> dict:
         sys.exit(1)
     finally:
         try:
-            await camoufox_manager.__aexit__(None, None, None)
+            if camoufox_manager:
+                await camoufox_manager.__aexit__(None, None, None)
         except:
             pass
-
 
 
 async def main_async() -> None:
