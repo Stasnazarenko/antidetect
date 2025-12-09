@@ -1,180 +1,170 @@
-import fingerprint from './fingerprint.js';
+import { spawn } from 'child_process';
+import { timeLog } from '../utils.js';
 import * as db from './db.js';
-import * as browser from './browser.js';
-import { timeLog, state } from '../utils.js';
-import fs from 'fs';
-import * as config from '../config.js';
+import get_Fingerprint from './fingerprint.js';
+import { fileURLToPath } from 'url';
+import path from 'path';
 
-process.on('uncaughtException', (err) => {
-    console.error(err);
-});
 
-let active = {};
+let pythonBridge = null;
 
-async function saveFP(dir){
-    let fp = await fingerprint();
-    let data = JSON.parse(fp);
-    fs.writeFileSync(dir +'/fp.json', JSON.stringify(data));
-};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-let create_Profile = async function (name, options) {
-    let dir;
-    let storageType = await state.storageType;
-    switch(storageType){
-      case 'Cloud':
-        dir = config.cloudDir + `profiles/${name}`;
-        break;
-      case 'Local':
-        dir = config.storageDir + `profiles/${name}`;
-        break;
+async function ensureBridge() {
+    if (pythonBridge && !pythonBridge.killed) {
+        return pythonBridge;
+    }
+
+    console.log(timeLog() + ' Starting Camoufox bridge...');
+
+    const projectRoot = path.resolve(__dirname, '..');
+    const bridgePath = path.join(projectRoot, 'scr', 'camoufox_bridge.py');
+
+    // Використовуємо системний python3
+    pythonBridge = spawn('python3', [bridgePath], {
+        cwd: projectRoot,
+        stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    // Wait for bridge to be ready
+    await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('Bridge startup timeout'));
+        }, 10000);
+
+        pythonBridge.stdout.once('data', (data) => {
+            clearTimeout(timeout);
+            console.log(timeLog() + ' Bridge ready:', data.toString().trim());
+            resolve();
+        });
+
+        pythonBridge.on('error', (err) => {
+            clearTimeout(timeout);
+            reject(new Error(`Failed to start Python bridge: ${err.message}`));
+        });
+    });
+
+    pythonBridge.stderr.on('data', (data) => {
+        console.error(timeLog() + ' Bridge error:', data.toString());
+    });
+
+    pythonBridge.on('close', (code) => {
+        console.log(timeLog() + ` Bridge exited (${code})`);
+        pythonBridge = null;
+    });
+
+    return pythonBridge;
+}
+
+
+// Launch profile using Python bridge
+async function launch_Profile(name) {
+    console.log(timeLog() + `Launching Camoufox for profile ${name}...`);
+
+    const bridge = await ensureBridge();
+    const profile = await db.get_Profile(name);
+
+    const command = {
+        action: 'launch',
+        profile: name,
+        config: {
+            fingerprint: profile.get('fingerprint') || false,
+            proxy: profile.get('proxy') || null,
+            proxyType: profile.get('proxyType') || null
+        }
     };
-    if (fs.existsSync(dir))
-        return console.log(timeLog() + 
-        ` Profile's folder ${name} already created. If you want to create new profile ${name} then delete folder ${name} in ${config.cloudDir + 'profiles'}.`);
-    fs.mkdirSync(dir, { recursive: true });
-    let profile = {
+
+    // Send command to bridge
+    bridge.stdin.write(JSON.stringify(command) + '\n');
+
+    // Wait for response
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('Launch timeout'));
+        }, 10000);
+
+        bridge.stdout.once('data', (data) => {
+            clearTimeout(timeout);
+            try {
+                const response = JSON.parse(data.toString());
+                if (response.success) {
+                    resolve(response);
+                } else {
+                    reject(new Error(response.error || 'Launch failed'));
+                }
+            } catch (e) {
+                reject(new Error('Invalid response: ' + data.toString()));
+            }
+        });
+    });
+}
+
+async function create_Profile(name, options = {}) {
+    console.log(timeLog() + ` Creating profile ${name}...`);
+
+    // Перевірка чи профіль вже існує
+    const exists = await db.check_Profile(name);
+    if (exists) {
+        console.log(timeLog() + ` Profile ${name} already exists`);
+        return false;
+    }
+
+    // Генерація fingerprint якщо потрібно
+    let fingerprintData = null;
+    if (options.fingerprint) {
+        fingerprintData = JSON.parse(await get_Fingerprint());
+        console.log(timeLog() + ` Generated fingerprint for ${name}`);
+    }
+
+    // Створення даних профілю
+    const profileData = {
         name: name,
-        open: '',
-        // proxy: '',
-        fingerprint: '',
+        fingerprint: fingerprintData,
+        proxy: options.proxy || null,
+        proxyType: options.proxyType || null,
+        open: ' ',
+        select: ' '
     };
-    if (options && options.fingerprint == true){
-        await saveFP(dir);
-        profile.fingerprint = true;
-    };
-    await db.update_Profile(name, profile);
-    return console.log(timeLog() + ` Profile ${name} created`);
-};
 
-let open_Profile = async function (name){
+    // Збереження профілю
+    await db.update_Profile(name, profileData);
+
+    console.log(timeLog() + ` Profile ${name} created successfully`);
+    return true;
+}
+
+
+let open_Profile = async function (name) {
     let check = await db.check_Profile(name);
     if (!check)
-        return console.log(timeLog() + ` Profile ${name} is not exist`);
+        return console.log(timeLog() + ` Profile ${name} does not exist`);
+
     let profile = await db.get_Profile(name);
-    check = await profile.get('open');
-    if (check == true && check != undefined)
+    let isOpen = await profile.get('open');
+
+    if (isOpen === 1 || isOpen === true) {
         return console.log(timeLog() + ` Profile ${name} already open`);
-    console.log(timeLog() + ` Opening profile ${name}...`);
-    let dir;
-    let storageType = await state.storageType;
-    switch(storageType){
-      case 'Cloud':
-        dir = config.cloudDir + `profiles/${name}`;
-        break;
-      case 'Local':
-        dir = config.storageDir + `profiles/${name}`;
-        break;
-    };
-    if (!fs.existsSync(dir))
-        await create_Profile(name, {fingerprint: true});
-    if (!fs.existsSync(dir + '/fp.json'))
-        await saveFP(dir);
-    let page = await browser.launch(name, profile);
-    if (!page)
-        return false;
-    await db.open_Profile(name);
-    active[name] = page;
-    console.log(timeLog() + ` Profile ${name} open`);
-    return page;
-};
-
-let set_ProfileProxy = async function (name, proxy){
-    let profileData = {};
-    let proxySplit = proxy.split(':');
-    profileData.proxyType = proxySplit[0];
-    proxySplit.shift();
-    profileData.proxy = proxySplit.join(':');
-    await db.update_Profile(name, profileData);
-};
-
-let delete_ProfileProxy = async function (name){
-    let profileData = {};
-    profileData.proxy = ' ';
-    await db.update_Profile(name, profileData);
-};
-
-let change_ProfileFP = async function (name){
-    let profileData = {};
-    let storageType = await state.storageType;
-    let dir;
-    switch(storageType){
-        case 'Cloud':
-          dir = config.cloudDir + `profiles/${name}`;
-          break;
-        case 'Local':
-          dir = config.storageDir + `profiles/${name}`;
-          break;
-    };
-    await saveFP(dir);
-    profileData.fingerprint = 1;
-    await db.update_Profile(name, profileData);
-};
-
-let delete_ProfileFP = async function (name){
-    let dir = config.cloudDir + `profiles/` + name;
-    let profileData = {};
-    profileData.fingerprint = '';
-    await db.update_Profile(name, profileData);
-    try {
-        fs.rmSync(dir + '/fingerprint.json', { recursive: true });
-        console.log(timeLog() + ` Profile ${name}. Fingerprint is deleted`);
     }
-    catch (error) {
-        console.log(timeLog() + ' Fingerprint delete error');
-    };
-};
 
-// let add_ProfileTag = async function (name, tag){
-//     let profileData = await db.get_Profile(name);
-//     if (profileData.tags.includes(tag))
-//         return;
-//     profileData.tags.push(tag);
-//     await db.update_Profile(name, profileData);
-// };
+    console.log(timeLog() + ` Opening profile ${name}...`);
 
-// let delete_ProfileTag = async function (name, tag){
-//     let profileData = await db.get_Profile(name);
-//     if (profileData.tags.indexOf(tag) < 0)
-//         return;
-//     profileData.tags.splice(profileData.tags.indexOf(tag), 1);
-//     await db.update_Profile(name, profileData);
-// };
-
-let rename_Profile = async function (name, newName){
-    let dir = config.cloudDir + `profiles/`;
-    let profileData = {};
-    profileData.name = newName;
-    await db.update_Profile(name, profileData);
     try {
-        fs.renameSync(`${dir + name}`, `${dir + newName}`);
-        console.log(timeLog() + ' Profile renamed');
-    } 
-    catch (error) {
-        console.log(timeLog() + ' Rename error');
-    };
+        await launch_Profile(name);
+        await db.open_Profile(name);
+        console.log(timeLog() + ` Profile ${name} opened successfully`);
+    } catch (error) {
+        console.error(timeLog() + ' Error:', error.message);
+    }
 };
 
-let delete_Profile = async function (name) {
-    let dir = config.cloudDir + `profiles/` + name;
-    await db.delete_Profile(name);
-    try {
-        fs.rmSync(dir, { recursive: true });
-        console.log(timeLog() + ` Profile ${name} is deleted`);
-    } 
-    catch (err) {
-        console.error(timeLog() + ` Error while deleting profile ${name}`);
-    };
-    // console.log(timeLog() + ' The profile folder is saved on the cloud, to completely delete the profile, delete the profile folder from the shared profile storage');
-};
+// Cleanup on exit
+process.on('exit', () => {
+    if (pythonBridge) {
+        pythonBridge.stdin.write(JSON.stringify({ action: 'shutdown' }) + '\n');
+        pythonBridge.kill();
+    }
+});
 
-let get_ProfilesNames = async function (){
-    let profiles = await db.get_Profiles();
-    let names = [];
-    for (let i = 0; i < profiles.length; i++)
-        if (profiles[i].name != undefined)
-            names.push(profiles[i].name)
-    return names;
-};
+export { open_Profile, launch_Profile, create_Profile };
 
-
-export { create_Profile, open_Profile, set_ProfileProxy, active, get_ProfilesNames, delete_Profile, rename_Profile, change_ProfileFP, delete_ProfileFP, delete_ProfileProxy };
