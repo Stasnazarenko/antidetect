@@ -1,3 +1,4 @@
+// javascript
 import * as config from '../config.js';
 import { timeLog, state } from '../utils.js';
 import * as db from './db.js';
@@ -14,51 +15,104 @@ import { fileURLToPath } from 'url';
 
 const lock = new AsyncLock();
 
+/**
+ * Safely parse a proxy string into components.
+ * Supported forms:
+ *  - username:password@host:port
+ *  - host:port
+ *  - socks5://username:password@host:port
+ *  - http://host:port
+ */
+function parseProxy(proxy) {
+  const s = (proxy ?? '').toString().trim();
+  if (!s) return { protocol: '', host: '', port: '', username: '', password: '', hasAuth: false };
 
-let proxyChecker = async function (type, proxy, auth){
-  let host = proxy.split(':')[0];
-  let port = proxy.split(':')[1]
-  let username = auth.split(':')[0];
-  let password = auth.split(':')[1];
-  let check;
-  if (type == 'https'){
-    try {
-      check = await axios.get('http://ip.bablosoft.com/', {
-      proxy: {
-        protocol: 'http',
-        host: host,
-        port: port,
-        auth: {
-          username,
-          password,
-        },
-      },
-    });
-    } catch (err){
-      check = false;
-    }
-   };
-  if (type == 'socks5'){
-    const proxyAgent  = new SocksProxyAgent(`socks5://${username}:${password}@${host}:${port}`);
-    const axiosInstance = axios.create({
-      httpsAgent: proxyAgent, 
-      httpAgent: proxyAgent 
-    });
-    try {
-      check = await axiosInstance.get('http://ip.bablosoft.com/');
-    check = check.status;
-    } catch (err){
-      check = false;
-    }
+  let proto = '';
+  let rest = s;
+
+  const protoMatch = rest.match(/^([a-z0-9.+-]+):\/\/(.*)$/i);
+  if (protoMatch) {
+    proto = protoMatch[1].toLowerCase();
+    rest = protoMatch[2];
+  }
+
+  let username = '';
+  let password = '';
+  let host = '';
+  let port = '';
+
+  const atIndex = rest.indexOf('@');
+  if (atIndex !== -1) {
+    const auth = rest.slice(0, atIndex);
+    rest = rest.slice(atIndex + 1);
+    const authParts = auth.split(':');
+    username = (authParts[0] ?? '').trim();
+    password = (authParts[1] ?? '').trim();
+  }
+
+  const hostParts = rest.split(':');
+  host = (hostParts[0] ?? '').trim();
+  port = (hostParts[1] ?? '').trim();
+
+  return {
+    protocol: proto,
+    host,
+    port,
+    username,
+    password,
+    hasAuth: Boolean(username || password)
   };
-  if (check)
-    return true;
-  else 
-    return false;
-};
+}
 
 /**
- * Launch Camoufox browser via Python bridge
+ * Check proxy reachability and auth by making a simple request.
+ * type: 'http' | 'https' | 'socks5' | 'socks'
+ * proxyObj: { host, port, username, password }
+ * Returns boolean
+ */
+async function proxyChecker(type, proxyObj) {
+  if (!proxyObj || !proxyObj.host || !proxyObj.port) return false;
+
+  try {
+    if (type === 'http' || type === 'https') {
+      const axiosConfig = {
+        proxy: {
+          protocol: type === 'https' ? 'https' : 'http',
+          host: proxyObj.host,
+          port: Number(proxyObj.port)
+        },
+        timeout: 8000
+      };
+      if (proxyObj.username) {
+        axiosConfig.proxy.auth = {
+          username: proxyObj.username,
+          password: proxyObj.password ?? ''
+        };
+      }
+      const res = await axios.get('http://ip.bablosoft.com/', axiosConfig);
+      return Boolean(res && (res.status === 200 || res.status === 201));
+    }
+
+    if (type === 'socks5' || type === 'socks') {
+      const authSegment = proxyObj.username ? `${encodeURIComponent(proxyObj.username)}:${encodeURIComponent(proxyObj.password ?? '')}@` : '';
+      const agent = new SocksProxyAgent(`socks5://${authSegment}${proxyObj.host}:${proxyObj.port}`);
+      const axiosInstance = axios.create({
+        httpAgent: agent,
+        httpsAgent: agent,
+        timeout: 8000
+      });
+      const res = await axiosInstance.get('http://ip.bablosoft.com/');
+      return Boolean(res && (res.status === 200 || res.status === 201));
+    }
+  } catch (e) {
+    // ignore and treat as failure
+  }
+
+  return false;
+}
+
+/**
+ * Launch Camoufox via the Python bridge script and resolve with { wsEndpoint, process }.
  */
 async function launchCamoufox(launchConfig) {
   return new Promise((resolve, reject) => {
@@ -66,193 +120,210 @@ async function launchCamoufox(launchConfig) {
     const __dirname = path.dirname(__filename);
     const pythonScript = path.join(__dirname, 'camoufox_bridge.py');
     const configJson = JSON.stringify(launchConfig);
-    
+
     const pythonProcess = spawn('python3', [pythonScript, configJson], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
-    
+
     let stdout = '';
     let stderr = '';
-    
+    let resolved = false;
+
     pythonProcess.stdout.on('data', (data) => {
       stdout += data.toString();
-      
-      // Try to parse connection info
+      // try parse lines for JSON object with wsEndpoint
       try {
         const lines = stdout.split('\n');
         for (const line of lines) {
-          if (line.trim().startsWith('{')) {
-            const result = JSON.parse(line);
-            if (result.success && result.wsEndpoint) {
-              resolve({
-                wsEndpoint: result.wsEndpoint,
-                process: pythonProcess
-              });
-              return;
+          const t = line.trim();
+          if (!t) continue;
+          if (t.startsWith('{')) {
+            const parsed = JSON.parse(t);
+            if (parsed && parsed.success && parsed.wsEndpoint) {
+              resolved = true;
+              return resolve({ wsEndpoint: parsed.wsEndpoint, process: pythonProcess });
             }
           }
         }
       } catch (e) {
-        // Continue accumulating output
+        // keep accumulating
       }
     });
-    
+
     pythonProcess.stderr.on('data', (data) => {
       stderr += data.toString();
     });
-    
+
     pythonProcess.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`Python bridge failed: ${stderr || stdout}`));
+      if (!resolved) {
+        const msg = stderr || stdout || `Python bridge exited with code ${code}`;
+        return reject(new Error(msg));
       }
     });
-    
-    // Timeout after 30 seconds
+
+    // safety timeout
     setTimeout(() => {
-      pythonProcess.kill();
-      reject(new Error('Camoufox launch timeout'));
+      if (!resolved) {
+        try { pythonProcess.kill(); } catch (e) { /* ignore */ }
+        return reject(new Error('Camoufox launch timeout'));
+      }
     }, 30000);
   });
 }
 
-let launch = async function (name, profile){
-  let browser;
-  let pythonProcess;
+/**
+ * Launch a profile (main entry). Returns Playwright Page or false on failure.
+ */
+let launch = async function (name, profile) {
+  let browser = null;
+  let pythonProcess = null;
+
   await lock.acquire('key', async () => {
     let dir;
-    let storageType = await state.storageType;
-    switch(storageType){
+    const storageType = await state.storageType;
+    switch (storageType) {
       case 'Cloud':
         dir = config.cloudDir + `profiles/${name}`;
         break;
       case 'Local':
+      default:
         dir = config.storageDir + `profiles/${name}`;
         break;
-    };
-    if (!fs.existsSync(dir))
-      fs.mkdirSync(dir, { recursive: true });
+    }
 
-    if (!fs.existsSync(dir + '/fp.json')){
-      let fp = await fingerprint();
-      let data = JSON.parse(fp);
-      fs.writeFileSync(dir +'/fp.json', JSON.stringify(data));
-    };
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-    // Build launch configuration
-    let launchConfig = {
+    if (!fs.existsSync(path.join(dir, 'fp.json'))) {
+      const fpRaw = await fingerprint();
+      try {
+        const data = JSON.parse(fpRaw);
+        fs.writeFileSync(path.join(dir, 'fp.json'), JSON.stringify(data));
+      } catch (e) {
+        // if fingerprint generation failed, continue with empty fp
+        fs.writeFileSync(path.join(dir, 'fp.json'), JSON.stringify({}));
+      }
+    }
+
+    const launchConfig = {
       profileDir: dir,
       fingerprint: {}
     };
-    
-    // Load fingerprint configuration
-    if (await profile.get('fingerprint') > false){
-      let fpConfig = JSON.parse(fs.readFileSync(dir + '/fp.json'));
-      launchConfig.fingerprint = fpConfig;
+
+    try {
+      const fpEnabled = await profile.get('fingerprint');
+      if (fpEnabled) {
+        const fpConfig = JSON.parse(fs.readFileSync(path.join(dir, 'fp.json'), 'utf8'));
+        launchConfig.fingerprint = fpConfig;
+      }
+    } catch (e) {
+      // ignore fingerprint load errors
     }
 
-    // Configure proxy
+    // Proxy handling - only enable when proxyType is truthy and not string "false"
     let proxyType = await profile.get('proxyType');
-    if (proxyType != false){
-      let proxy = await profile.get('proxy');
-      let login = proxy.split(':', -2);
-      proxy = proxy.split(':', 2);
-      login = login[2] + ':' + login[3];
-      let check = await proxyChecker(proxyType, proxy.join(":"), login);
-      if (check == false){
-        console.log(timeLog() + ' Bad proxy at ' + name);
-        browser =  false;
+    if (proxyType && proxyType !== 'false') {
+      const proxyString = (await profile.get('proxy')) ?? '';
+      console.log(timeLog() + ` Proxy raw for ${name}: ${proxyString}`);
+
+      const parsed = parseProxy(proxyString);
+      console.log(timeLog() + ` Parsed proxy for ${name}: ${JSON.stringify(parsed)}`);
+
+      if (!parsed.host || !parsed.port) {
+        console.log(timeLog() + ' Bad proxy at ' + name + ' (missing host/port)');
+        browser = false;
         return false;
       }
 
-      let [username, password] = login.split(':');
+      const ok = await proxyChecker(proxyType, parsed);
+      if (!ok) {
+        console.log(timeLog() + ' Bad proxy at ' + name + ' (checker failed)');
+        browser = false;
+        return false;
+      }
+
       launchConfig.proxy = {
-        server: `${proxyType}://${proxy.join(":")}`,
-        username: username,
-        password: password
+        server: `${proxyType}://${parsed.host}:${parsed.port}`,
+        username: parsed.username,
+        password: parsed.password
       };
     }
 
-    // Launch Camoufox via Python bridge
+    // Launch Camoufox and connect browser via Playwright CDP
     try {
       console.log(timeLog() + ` Launching Camoufox for profile ${name}...`);
       const result = await launchCamoufox(launchConfig);
       pythonProcess = result.process;
-      
-      // Connect to browser via Playwright
       browser = await chromium.connectOverCDP(result.wsEndpoint);
-      
       console.log(timeLog() + ` Camoufox connected for profile ${name}`);
-    } catch (error) {
-      console.log(timeLog() + ' Error launching Camoufox: ' + error.message);
+    } catch (err) {
+      console.log(timeLog() + ' Error launching Camoufox: ' + (err?.message ?? err));
       browser = false;
       return false;
     }
 
+    // attach metadata and cleanup handler
     browser.name = name;
     browser._pythonProcess = pythonProcess;
-    
+
     browser.on('disconnected', async () => {
       console.log(timeLog() + `Profile ${name} closed`);
-      
-      // Kill Python process
       if (pythonProcess && !pythonProcess.killed) {
-        pythonProcess.kill();
+        try { pythonProcess.kill(); } catch (e) { /* ignore */ }
       }
-      
       delete manage.active[name];
-      switch(storageType){
+      switch (storageType) {
         case 'Cloud':
           setTimeout(db.close_Profile, 5000, name);
           break;
         case 'Local':
+        default:
           setTimeout(db.close_Profile, 3000, name);
           break;
-      };
-    });  
-  });
-  
-  if (browser == false)
-    return false;
-  
-  const contexts = browser.contexts();
-  const page = await contexts[0].newPage();
-  
-  try{
-    if (name.includes('Grass')){
-      try {
-        await page.goto('https://app.getgrass.io/dashboard');
       }
-      catch (err){
+    });
+  });
+
+  if (browser === false || !browser) return false;
+
+  const contexts = browser.contexts();
+  const context = contexts && contexts[0];
+  if (!context) {
+    try { await browser.close(); } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  const page = await context.newPage();
+
+  try {
+    if (name.includes('Grass')) {
+      try {
+        await page.goto('https://app.getgrass.io/dashboard', { timeout: 15000 });
+      } catch (err) {
         console.log(timeLog() + ' Bad proxy at ' + name);
-        await browser.close();
+        try { await browser.close(); } catch (e) { /* ignore */ }
         return false;
       }
+    } else {
+      await page.goto('https://abrahamjuliot.github.io/creepjs/', { timeout: 15000 });
     }
-    else {
-      await page.goto('https://abrahamjuliot.github.io/creepjs/');
+  } catch (err) {
+    try {
+      await page.goto('https://google.com/', { timeout: 10000 });
+    } catch (e) {
+      // ignore
     }
   }
-  catch(err){
-    await page.goto('https://google.com/');
+
+  // close default about:blank pages
+  const pages = await context.pages();
+  for (let i = 0; i < pages.length; i++) {
+    const url = pages[i].url();
+    if (url === 'about:blank') {
+      try { await pages[i].close(); } catch (e) { /* ignore */ }
+    }
   }
-  
-  const pages = await contexts[0].pages();
-  for (let i = 0; i < pages.length; i++){
-    let url = pages[i].url();
-    if (url === 'about:blank')
-      await pages[i].close();
-  }
-  
+
   return page;
 };
 
 export { launch };
-
-
-
-
-
-  
-
-
-
