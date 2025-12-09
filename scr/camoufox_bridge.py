@@ -21,7 +21,7 @@ class BrowserManager:
 
             launch_config = {
                 "headless": config.get("headless", False),
-                "timeout": config.get("timeout", 120000)
+                "timeout": config.get("timeout", 120000),
             }
 
             if fingerprint_config:
@@ -38,17 +38,29 @@ class BrowserManager:
                 if "geoip" in fingerprint_config:
                     launch_config["geoip"] = fingerprint_config["geoip"]
 
-            if "proxy" in config:
+            if "proxy" in config and config["proxy"]:
                 launch_config["proxy"] = config["proxy"]
 
-            # Запуск браузера
-            browser = await AsyncCamoufox(**launch_config).start()
+            # Launch Camoufox
+            camoufox = AsyncCamoufox(**launch_config)
+            browser = await camoufox.start()
 
-            # Створення persistent context
-            context = await browser.new_persistent_context(str(profile_path))
+            # Перевіряємо чи існує файл стану
+            state_file = profile_path / "state.json"
+
+            if state_file.exists():
+                context = await browser.new_context(storage_state=str(state_file))
+            else:
+                context = await browser.new_context()
+
             page = await context.new_page()
 
-            self.browsers[profile_name] = browser
+            self.browsers[profile_name] = {
+                "browser": browser,
+                "context": context,
+                "page": page,
+                "profile_path": profile_path
+            }
 
             return {"success": True, "profile": profile_name}
 
@@ -58,7 +70,18 @@ class BrowserManager:
     async def close_profile(self, profile_name: str):
         try:
             if profile_name in self.browsers:
-                await self.browsers[profile_name].close()
+                browser_info = self.browsers[profile_name]
+
+                # Зберігаємо стан перед закриттям
+                if "context" in browser_info and "profile_path" in browser_info:
+                    await browser_info["context"].storage_state(
+                        path=str(browser_info["profile_path"] / "state.json")
+                    )
+                    await browser_info["context"].close()
+
+                if "browser" in browser_info:
+                    await browser_info["browser"].close()
+
                 del self.browsers[profile_name]
             return {"success": True}
         except Exception as e:
