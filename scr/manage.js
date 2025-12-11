@@ -158,6 +158,83 @@ let open_Profile = async function (name) {
     }
 };
 
+async function close_Profile(name) {
+    console.log(timeLog() + ` Closing profile ${name}...`);
+
+    const bridge = await ensureBridge();
+
+    const command = {
+        action: 'close',
+        profile: name
+    };
+
+    bridge.stdin.write(JSON.stringify(command) + '\n');
+
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('Close timeout'));
+        }, 5000);
+
+        bridge.stdout.once('data', (data) => {
+            clearTimeout(timeout);
+            try {
+                const response = JSON.parse(data.toString());
+                if (response.success) {
+                    db.close_Profile(name).then(() => {
+                        console.log(timeLog() + ` Profile ${name} closed successfully`);
+                        resolve(response);
+                    });
+                } else {
+                    // Якщо профіль не відкритий - все одно оновлюємо БД
+                    if (response.error === 'Profile not open') {
+                        db.close_Profile(name).then(() => {
+                            console.log(timeLog() + ` Profile ${name} status reset to closed`);
+                            resolve(response);
+                        });
+                    } else {
+                        reject(new Error(response.error || 'Close failed'));
+                    }
+                }
+            } catch (e) {
+                reject(new Error('Invalid response: ' + data.toString()));
+            }
+        });
+    });
+}
+
+async function cleanup_DeadBrowsers() {
+    console.log(timeLog() + ' Cleaning up dead browsers...');
+
+    const bridge = await ensureBridge();
+
+    const command = {
+        action: 'cleanup'
+    };
+
+    bridge.stdin.write(JSON.stringify(command) + '\n');
+
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('Cleanup timeout'));
+        }, 5000);
+
+        bridge.stdout.once('data', (data) => {
+            clearTimeout(timeout);
+            try {
+                const response = JSON.parse(data.toString());
+                if (response.success) {
+                    console.log(timeLog() + ` Cleaned ${response.cleaned} dead browsers`);
+                    resolve(response);
+                } else {
+                    reject(new Error(response.error || 'Cleanup failed'));
+                }
+            } catch (e) {
+                reject(new Error('Invalid response: ' + data.toString()));
+            }
+        });
+    });
+}
+
 // Cleanup on exit
 process.on('exit', () => {
     if (pythonBridge) {
@@ -166,5 +243,10 @@ process.on('exit', () => {
     }
 });
 
-export { open_Profile, launch_Profile, create_Profile };
-
+export {
+    open_Profile,
+    launch_Profile,
+    create_Profile,
+    close_Profile,
+    cleanup_DeadBrowsers
+};

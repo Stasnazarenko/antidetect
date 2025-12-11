@@ -112,4 +112,21 @@ let setEngine = function(name){
     console.log(timeLog() + 'Selected engine: ' + name);
 };
 
-export { setNewProxy, rename_Profile, create_Profile, openSelected, deleteSelected, newEngine, setEngine };
+let close_Profile = async function(name) {
+    try {
+        await manage.close_Profile(name);
+    } catch (error) {
+        console.log(timeLog() + ` Error closing profile: ${error.message}`);
+    }
+};
+
+let cleanup_DeadBrowsers = async function() {
+    try {
+        const result = await manage.cleanup_DeadBrowsers();
+        console.log(timeLog() + ` Cleaned up ${result.cleaned || 0} dead browsers`);
+    } catch (error) {
+        console.log(timeLog() + ` Error cleaning up: ${error.message}`);
+    }
+};
+
+export { setNewProxy, rename_Profile, create_Profile, openSelected, deleteSelected, newEngine, setEngine, close_Profile, cleanup_DeadBrowsers };

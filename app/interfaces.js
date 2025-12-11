@@ -151,19 +151,20 @@ let storage_Type = async function(){
 let profiles_Menu = async function(){
     inquirer.prompt([
         {
-          type: 'list',
-          pageSize: 20,
-          name: 'profileAction',
-          message: 'Select a menu item:',
-          prefix: timeLog(),
-          choices: [
-            new inquirer.Separator(), 
-            'New profile', 
-            'List of profiles', 
-            'Selected in the table',
-            new inquirer.Separator(), 
-            'Back'
-          ],
+            type: 'list',
+            pageSize: 20,
+            name: 'profileAction',
+            message: 'Select a menu item:',
+            prefix: timeLog(),
+            choices: [
+                new inquirer.Separator(),
+                'New profile',
+                'List of profiles',
+                'Selected in the table',
+                'Cleanup dead browsers',
+                new inquirer.Separator(),
+                'Back'
+            ],
         }
     ]).then(async (answers) => {
         switch(answers.profileAction){
@@ -171,17 +172,21 @@ let profiles_Menu = async function(){
                 let name = await commands.create_Profile();
                 if (name != false)
                     return profile_Action(name);
-                else    
+                else
                     return profiles_Menu(name);
             case 'List of profiles':
                 return profiles();
             case 'Selected in the table':
                 return selected_Actions();
+            case 'Cleanup dead browsers':
+                await commands.cleanup_DeadBrowsers();
+                return profiles_Menu();
             case 'Back':
                 return start();
         };
     });
 };
+
 
 let profiles = async function(){
     let names = await db.get_Profiles();
@@ -236,10 +241,11 @@ let profile_Action = async function (profile){
     let pdata = await db.get_Profile(profile);
     let message;
     let open = await pdata.get('open');
-    if (open == true)
+    if (open == true || open == 1)
         message = `Profile: ${profile}\nOpen: true\n`
-    else 
+    else
         message = `Profile: ${profile}\nOpen: false\n`
+
     let proxy = await pdata.get('proxy');
     if (proxy == false || proxy == undefined)
         message = message + `Proxy: false The real ip\n`
@@ -256,50 +262,57 @@ IP: ${proxy}\n`;
         message = message + `Fingerprint: false\n`;
     else
         message = message + `Fingerprint: true\n`;
-    inquirer.prompt([{
-      type: 'list',
-      name: 'action',
-      pageSize: 31,
-      message: message + 'Select an action:',
-      prefix: timeLog(),
-      choices: [
-        new inquirer.Separator(),
-        'Open', 
-        'Proxy', 
+
+    // Динамічний список опцій
+    let actionChoices = [new inquirer.Separator()];
+
+    if (open == true || open == 1) {
+        actionChoices.push('Close');
+    } else {
+        actionChoices.push('Open');
+    }
+
+    actionChoices.push(
+        'Proxy',
         'Fingerprint',
-        // 'Extensions', 
         'Rename',
         'Delete',
-        new inquirer.Separator(), 
-        'Back', 
+        new inquirer.Separator(),
+        'Back',
         'Back to menu'
-    ],
-    },
-  ]).then(async (answers) => {
-    switch(answers.action) {
-        case 'Back':
-            return profiles();
-        case 'Back to menu':
-            return start();
-        case 'Open':
-            manage.open_Profile(profile).then(() => profiles());
-            break;
-        case 'Info':
-            return start();
-        case 'Proxy':
-            return proxy_Profile(profile);
-        case 'Fingerprint':
-            return await fp_Profile(profile);
-        // case 'Extensions':
-        //     return start();
-        case 'Rename':
-            let name = await commands.rename_Profile(profile);
-            return profile_Action(name);
-        case 'Delete':
-            await manage.delete_Profile(profile);
-            return profiles();
-    };
-  });
+    );
+
+    inquirer.prompt([{
+        type: 'list',
+        name: 'action',
+        pageSize: 31,
+        message: message + 'Select an action:',
+        prefix: timeLog(),
+        choices: actionChoices,
+    }]).then(async (answers) => {
+        switch(answers.action) {
+            case 'Close':
+                await commands.close_Profile(profile);
+                return profile_Action(profile);
+            case 'Open':
+                await manage.open_Profile(profile);
+                return profile_Action(profile);
+            case 'Back':
+                return profiles();
+            case 'Back to menu':
+                return start();
+            case 'Proxy':
+                return proxy_Profile(profile);
+            case 'Fingerprint':
+                return await fp_Profile(profile);
+            case 'Rename':
+                let name = await commands.rename_Profile(profile);
+                return profile_Action(name);
+            case 'Delete':
+                await manage.delete_Profile(profile);
+                return profiles();
+        }
+    });
 };
 
 let proxy_Profile = async function(name){
