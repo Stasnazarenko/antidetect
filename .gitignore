@@ -2,6 +2,7 @@
 .env
 .idea/
 profiles
+tests
 
 # Node modules
 node_modules/
