@@ -41,4 +41,3 @@ else
     echo "Unknown option: $1"
     echo "Run: ./start.sh help"
 fi
-
