@@ -148,6 +148,14 @@ let storage_Type = async function(){
     });
 };
 
+// Скидання статусу всіх профілів на "закрито" перед відкриттям списку профілів
+let resetAllProfilesStatusUI = async function() {
+    const names = await db.get_Profiles();
+    for (const name of names) {
+        await db.update_Profile(name, { open: false });
+    }
+};
+
 let profiles_Menu = async function(){
     inquirer.prompt([
         {
@@ -188,23 +196,21 @@ let profiles_Menu = async function(){
 };
 
 
-let profiles = async function(){
-    let names = await db.get_Profiles();
-    names.push(new inquirer.Separator(), 'Back');
-    names.unshift(new inquirer.Separator());
+let profiles = async function() {
+    await resetAllProfilesStatusUI(); // Скидаємо статуси перед показом списку
+    const names = await db.get_Profiles();
+    const choices = [new inquirer.Separator(), ...names, new inquirer.Separator(), 'Back'];
     inquirer.prompt([
-    {
-      type: 'rawlist',
-      pageSize: 20,
-      name: 'profile',
-      message: 'Select a profile:',
-      prefix: timeLog(),
-      choices: names,
-    }]).then(async (answers) => {
-        switch(answers.profile){
-            case 'Back':
-                return profiles_Menu();
-        };
+        {
+            type: 'rawlist',
+            name: 'profile',
+            message: 'Select a profile:',
+            choices
+        }
+    ]).then(async (answers) => {
+        if (answers.profile === 'Back') {
+            return profiles_Menu();
+        }
         return profile_Action(answers.profile);
     });
 };
@@ -241,7 +247,24 @@ let profile_Action = async function (profile){
     let pdata = await db.get_Profile(profile);
     let message;
     let open = await pdata.get('open');
-    if (open == true || open == 1)
+    // Додатково перевіряємо: якщо open === true, але процес реально не запущений — вважаємо закритим
+    let isReallyOpen = false;
+    if (open === true) {
+        // manage.active може бути як об'єкт, так і Map, перевіряємо обидва варіанти
+        if (manage.active) {
+            if (typeof manage.active.has === 'function') {
+                isReallyOpen = manage.active.has(profile);
+            } else {
+                isReallyOpen = Boolean(manage.active[profile]);
+            }
+        }
+        if (!isReallyOpen) {
+            // Автоматично скидаємо статус у базі, якщо процес не живий
+            await db.update_Profile(profile, { open: false });
+        }
+    }
+    open = isReallyOpen;
+    if (open)
         message = `Profile: ${profile}\nOpen: true\n`
     else
         message = `Profile: ${profile}\nOpen: false\n`
@@ -265,8 +288,7 @@ IP: ${proxy}\n`;
 
     // Динамічний список опцій
     let actionChoices = [new inquirer.Separator()];
-
-    if (open == true || open == 1) {
+    if (open) {
         actionChoices.push('Close');
     } else {
         actionChoices.push('Open');
@@ -414,5 +436,3 @@ let fp_Profile = async function(name){
 
 
 export { start };
-
-

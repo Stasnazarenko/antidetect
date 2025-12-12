@@ -7,6 +7,7 @@ import path from 'path';
 
 
 let pythonBridge = null;
+let active = {};
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -163,11 +164,13 @@ let open_Profile = async function (name) {
     try {
         await launch_Profile(name);
         await db.open_Profile(name);
+        active[name] = true; // <--- Додаємо профіль у active
         console.log(timeLog() + ` Profile ${name} opened successfully`);
     } catch (error) {
         console.error(timeLog() + ` Error opening ${name}:`, error.message);
         // Все одно позначаємо як відкритий - браузер МОЖЕ откритися потім
         await db.open_Profile(name);
+        active[name] = true; // <--- Додаємо профіль у active навіть при помилці
     }
 };
 
@@ -194,19 +197,16 @@ async function close_Profile(name) {
                 const response = JSON.parse(data.toString());
                 if (response.success) {
                     db.close_Profile(name).then(() => {
+                        delete active[name]; // <--- Видаляємо профіль з active
                         console.log(timeLog() + ` Profile ${name} closed successfully`);
                         resolve(response);
                     });
                 } else {
                     // Якщо профіль не відкритий - все одно оновлюємо БД
-                    if (response.error === 'Profile not open') {
-                        db.close_Profile(name).then(() => {
-                            console.log(timeLog() + ` Profile ${name} status reset to closed`);
-                            resolve(response);
-                        });
-                    } else {
-                        reject(new Error(response.error || 'Close failed'));
-                    }
+                    db.close_Profile(name).then(() => {
+                        delete active[name]; // <--- Видаляємо профіль з active
+                        resolve(response);
+                    });
                 }
             } catch (e) {
                 reject(new Error('Invalid response: ' + data.toString()));
@@ -247,6 +247,23 @@ async function cleanup_DeadBrowsers() {
         });
     });
 }
+
+// Скидання статусу всіх профілів на "закрито"
+async function resetAllProfilesStatus() {
+    const profiles = await db.get_Profiles();
+    for (const profile of profiles) {
+        if (profile && profile.get) {
+            await profile.assign({ open: false });
+            await profile.save();
+        }
+    }
+    console.log(timeLog() + ' All profiles status set to closed');
+}
+
+// Викликати resetAllProfilesStatus на старті
+resetAllProfilesStatus().catch(e => {
+    console.error(timeLog() + ' Error resetting all profiles status:', e);
+});
 
 // Cleanup on exit
 process.on('exit', () => {
@@ -306,16 +323,4 @@ async function rename_Profile(name, newName) {
     return newName;
 }
 
-export {
-    open_Profile,
-    launch_Profile,
-    create_Profile,
-    close_Profile,
-    cleanup_DeadBrowsers,
-    set_ProfileProxy,
-    delete_Profile,
-    delete_ProfileProxy,
-    change_ProfileFP,
-    delete_ProfileFP,
-    rename_Profile
-};
+export { create_Profile, open_Profile, close_Profile, active };

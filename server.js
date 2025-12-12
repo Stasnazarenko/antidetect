@@ -34,9 +34,17 @@ app.get('/api/profiles', async (req, res) => {
 
         for (const profile of profiles) {
             const pdata = await db.get_Profile(profile);
+            // Перевірка: якщо профіль неактивний у manage.active, скидаємо open
+            let isOpen = pdata.get('open') === true || pdata.get('open') === 1;
+            if (isOpen) {
+                if (!manage.active || !manage.active[profile]) {
+                    await db.update_Profile(profile, { open: false });
+                    isOpen = false;
+                }
+            }
             profilesData.push({
                 name: profile,
-                open: pdata.get('open') === true || pdata.get('open') === 1 ? true : false,
+                open: isOpen,
                 proxy: pdata.get('proxy') || false,
                 proxyType: pdata.get('proxyType') || 'http',
                 fingerprint: pdata.get('fingerprint') || false
@@ -303,4 +311,3 @@ httpServer.listen(PORT, () => {
 ╚════════════════════════════════════════╝
     `);
 });
-
