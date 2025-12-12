@@ -217,24 +217,19 @@ class BrowserManager:
 
             browser_info = self.browsers[profile_name]
 
-            # Видаляємо з dictionary ПЕРШИМ - щоб не блокуватись на закритті
+            # Закриваємо браузер і сторінку ПОСЛІДОВНО
+            async with self.close_lock:
+                try:
+                    await asyncio.wait_for(browser_info["page"].close(), timeout=3)
+                except Exception as e:
+                    print(f"Error closing page: {e}", file=sys.stderr)
+                try:
+                    await asyncio.wait_for(browser_info["browser"].close(), timeout=3)
+                except Exception as e:
+                    print(f"Error closing browser: {e}", file=sys.stderr)
+
+            # Тільки після закриття видаляємо з self.browsers
             del self.browsers[profile_name]
-
-            # Потім закриваємо АСИНХРОННО в фоні (без await!)
-            # Це дозволяє закривати декілька одночасно
-            async def close_async():
-                async with self.close_lock:  # Забезпечуємо послідовність
-                    try:
-                        await asyncio.wait_for(browser_info["page"].close(), timeout=3)
-                    except:
-                        pass
-                    try:
-                        await asyncio.wait_for(browser_info["browser"].close(), timeout=3)
-                    except:
-                        pass
-
-            # Запускаємо закриття в фоні БЕЗ await
-            asyncio.create_task(close_async())
 
             return {"success": True}
         except Exception as e:
