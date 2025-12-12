@@ -12,6 +12,8 @@ class BrowserManager:
         self.browsers = {}
         self.profiles_dir = Path(__file__).parent.parent / "profiles"
         self.profiles_dir.mkdir(exist_ok=True)
+        self.close_lock = asyncio.Lock()  # Забезпечує послідовне закриття
+        self.launch_semaphore = asyncio.Semaphore(3)  # Максимум 3 одночасних запусків
 
     def _get_fingerprint_config(self, os_type: str):
         """Генерує конфігурацію фінгерпринту для вказаної ОС"""
@@ -95,49 +97,118 @@ class BrowserManager:
         return len(dead_profiles)
 
     async def launch_profile(self, profile_name: str, config: dict):
-        try:
-            # Спочатку очищаємо мертві браузери
-            await self._cleanup_dead_browsers()
+        # Обмежуємо кількість одночасних запусків (max 3)
+        async with self.launch_semaphore:
+            try:
+                # Спочатку очищаємо мертві браузери
+                await self._cleanup_dead_browsers()
 
-            # Тепер перевіряємо чи профіль відкритий
-            if profile_name in self.browsers:
-                return {"success": False, "error": "Profile already open"}
+                # Тепер перевіряємо чи профіль відкритий
+                if profile_name in self.browsers:
+                    return {"success": False, "error": "Profile already open"}
 
-            profile_path = self.profiles_dir / profile_name
-            profile_path.mkdir(exist_ok=True)
+                profile_path = self.profiles_dir / profile_name
+                profile_path.mkdir(exist_ok=True)
 
-            os_type = config.get("os", random.choice(["macos", "windows"]))
-            fingerprint_config = self._get_fingerprint_config(os_type)
+                # Використовуємо базовий конфіг для генерації fingerprint
+                os_type = "macos"  # Генеруємо для macOS
+                fingerprint_config = self._get_fingerprint_config(os_type)
 
-            launch_config = {
-                "headless": config.get("headless", False),
-                "persistent_context": True,
-                "user_data_dir": str(profile_path),
-                "os": os_type if os_type == "macos" else None,
-                "config": fingerprint_config,
-                "i_know_what_im_doing": True
-            }
+                launch_config = {
+                    "headless": False,
+                    "persistent_context": True,
+                    "user_data_dir": str(profile_path),
+                    "os": os_type,
+                    "config": fingerprint_config,
+                    "i_know_what_im_doing": True
+                }
 
-            if "proxy" in config and config["proxy"]:
-                launch_config["proxy"] = config["proxy"]
+                if "proxy" in config and config["proxy"]:
+                    launch_config["proxy"] = config["proxy"]
 
-            camoufox = AsyncCamoufox(**launch_config)
-            browser = await camoufox.start()
+                camoufox = AsyncCamoufox(**launch_config)
+                browser = await camoufox.start()
 
-            pages = browser.pages
-            page = pages[0] if pages else await browser.new_page()
+                # Отримуємо існуючу сторінку
+                pages = browser.pages
+                page = pages[0] if pages else await browser.new_page()
 
-            self.browsers[profile_name] = {
-                "browser": browser,
-                "page": page,
-                "profile_path": profile_path,
-                "camoufox": camoufox
-            }
+                self.browsers[profile_name] = {
+                    "browser": browser,
+                    "page": page,
+                    "profile_path": profile_path,
+                    "camoufox": camoufox
+                }
 
-            return {"success": True, "profile": profile_name, "os": os_type}
+                return {"success": True, "profile": profile_name, "os": os_type}
 
-        except Exception as e:
-            return {"success": False, "error": str(e), "trace": traceback.format_exc()}
+            except Exception as e:
+                return {"success": False, "error": str(e), "trace": traceback.format_exc()}
+
+    def _convert_db_fingerprint(self, db_fp: dict):
+        """Конвертує складний fingerprint з БД в простий для Camoufox"""
+        config = {}
+
+        # OS Version - беремо перший preferred або середнє між min/max
+        if "osVersion" in db_fp:
+            os_version = db_fp["osVersion"]
+            if isinstance(os_version, dict):
+                if "preferred" in os_version and os_version["preferred"]:
+                    config["osVersion"] = os_version["preferred"][0]
+                elif "min" in os_version:
+                    config["osVersion"] = os_version["min"]
+            else:
+                config["osVersion"] = os_version
+
+        # Screen - беремо перший preferred або середні значення
+        if "screen" in db_fp:
+            screen = db_fp["screen"]
+            if isinstance(screen, dict):
+                if "preferred" in screen and screen["preferred"] and len(screen["preferred"]) > 0:
+                    # Беремо перший preferred екран
+                    preferred = screen["preferred"][0]
+                    config["screen"] = {
+                        "minWidth": preferred[0],
+                        "maxWidth": preferred[0],
+                        "minHeight": preferred[1],
+                        "maxHeight": preferred[1]
+                    }
+                elif "minWidth" in screen:
+                    config["screen"] = {
+                        "minWidth": screen["minWidth"],
+                        "maxWidth": screen.get("maxWidth", screen["minWidth"]),
+                        "minHeight": screen["minHeight"],
+                        "maxHeight": screen.get("maxHeight", screen["minHeight"])
+                    }
+
+        # Hardware Concurrency - беремо preferred або середнє
+        if "hardwareConcurrency" in db_fp:
+            hw = db_fp["hardwareConcurrency"]
+            if isinstance(hw, dict):
+                if "preferred" in hw and hw["preferred"]:
+                    config["hardwareConcurrency"] = hw["preferred"][0]
+                elif "min" in hw and "max" in hw:
+                    config["hardwareConcurrency"] = (hw["min"] + hw["max"]) // 2
+            else:
+                config["hardwareConcurrency"] = hw
+
+        # Device Memory - беремо preferred або середнє
+        if "deviceMemory" in db_fp:
+            mem = db_fp["deviceMemory"]
+            if isinstance(mem, dict):
+                if "preferred" in mem and mem["preferred"]:
+                    config["deviceMemory"] = mem["preferred"][0]
+                elif "min" in mem and "max" in mem:
+                    config["deviceMemory"] = (mem["min"] + mem["max"]) // 2
+            else:
+                config["deviceMemory"] = mem
+
+        # Прості поля
+        for key in ["geoip", "humanize", "headless", "block_images", "block_media"]:
+            if key in db_fp:
+                config[key] = db_fp[key]
+
+        return config
 
     async def close_profile(self, profile_name: str):
         try:
@@ -145,17 +216,70 @@ class BrowserManager:
                 return {"success": False, "error": "Profile not open"}
 
             browser_info = self.browsers[profile_name]
-            try:
-                await browser_info["page"].close()
-            except:
-                pass
-            try:
-                await browser_info["browser"].close()
-            except:
-                pass
 
+            # Видаляємо з dictionary ПЕРШИМ - щоб не блокуватись на закритті
             del self.browsers[profile_name]
+
+            # Потім закриваємо АСИНХРОННО в фоні (без await!)
+            # Це дозволяє закривати декілька одночасно
+            async def close_async():
+                async with self.close_lock:  # Забезпечуємо послідовність
+                    try:
+                        await asyncio.wait_for(browser_info["page"].close(), timeout=3)
+                    except:
+                        pass
+                    try:
+                        await asyncio.wait_for(browser_info["browser"].close(), timeout=3)
+                    except:
+                        pass
+
+            # Запускаємо закриття в фоні БЕЗ await
+            asyncio.create_task(close_async())
+
             return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def execute_script(self, profile_name: str, script: str):
+        """Виконує JavaScript скрипт в профілі (для RPA)"""
+        try:
+            if profile_name not in self.browsers:
+                return {"success": False, "error": "Profile not open"}
+
+            page = self.browsers[profile_name]["page"]
+            result = await page.evaluate(script)
+
+            return {"success": True, "result": result}
+        except Exception as e:
+            return {"success": False, "error": str(e), "trace": traceback.format_exc()}
+
+    async def navigate_profile(self, profile_name: str, url: str):
+        """Навігація на URL в профілі"""
+        try:
+            if profile_name not in self.browsers:
+                return {"success": False, "error": "Profile not open"}
+
+            page = self.browsers[profile_name]["page"]
+            await page.goto(url, wait_until='networkidle')
+
+            return {"success": True, "url": page.url}
+        except Exception as e:
+            return {"success": False, "error": str(e), "trace": traceback.format_exc()}
+
+    async def get_profile_status(self, profile_name: str):
+        """Отримати статус і поточний URL профілю"""
+        try:
+            if profile_name not in self.browsers:
+                return {"success": False, "error": "Profile not open", "open": False}
+
+            page = self.browsers[profile_name]["page"]
+
+            return {
+                "success": True,
+                "open": True,
+                "url": page.url,
+                "title": await page.title()
+            }
         except Exception as e:
             return {"success": False, "error": str(e)}
 

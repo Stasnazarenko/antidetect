@@ -1,0 +1,47 @@
+{
+  "name": "antidetect-browser",
+  "version": "1.0.0",
+  "description": "Antidetect Browser Manager - Desktop App",
+  "main": "main.js",
+  "homepage": "./",
+  "private": true,
+  "dependencies": {
+    "electron-squirrel-startup": "1.1.0"
+  },
+  "devDependencies": {
+    "electron": "^latest",
+    "electron-builder": "^latest"
+  },
+  "scripts": {
+    "dev": "electron .",
+    "build": "electron-builder",
+    "build-mac": "electron-builder -m",
+    "build-win": "electron-builder -w",
+    "build-linux": "electron-builder -l"
+  },
+  "build": {
+    "appId": "com.antidetect.browser",
+    "productName": "Antidetect Browser Manager",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "styles.css",
+      "app.js",
+      "scr/**",
+      "storage/**",
+      "node_modules/**"
+    ],
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "target": ["NSIS", "portable"]
+    },
+    "linux": {
+      "target": ["AppImage", "deb"]
+    }
+  }
+}
+

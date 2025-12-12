@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antidetect Browser Manager</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🦊 Antidetect Browser Manager</h1>
+        <div class="header-actions">
+            <div id="bulk-actions" style="display: none; gap: 10px;">
+                <button id="bulk-open-btn" class="btn btn-success">▶️ Open Selected (<span id="selected-count">0</span>)</button>
+                <button id="bulk-close-btn" class="btn btn-danger">⏹️ Close Selected</button>
+                <button id="bulk-delete-btn" class="btn btn-danger">🗑️ Delete Selected</button>
+                <button id="deselect-all-btn" class="btn btn-secondary">✖️ Deselect All</button>
+            </div>
+            <button onclick="window.location.href='/proxy-manager.html'" class="btn btn-primary">🌐 Proxy Manager</button>
+            <button id="cleanup-btn" class="btn btn-warning">🧹 Cleanup</button>
+            <button id="refresh-btn" class="btn btn-primary">🔄 Refresh</button>
+            <button id="new-profile-btn" class="btn btn-success">➕ New Profile</button>
+        </div>
+        </header>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="total-profiles">0</div>
+                <div class="stat-label">Total Profiles</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="open-profiles">0</div>
+                <div class="stat-label">Open Profiles</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="proxy-profiles">0</div>
+                <div class="stat-label">With Proxy</div>
+            </div>
+        </div>
+
+        <div class="filters">
+            <input type="text" id="search-input" placeholder="🔍 Search profiles..." />
+            <select id="filter-status">
+                <option value="all">All Profiles</option>
+                <option value="open">Open Only</option>
+                <option value="closed">Closed Only</option>
+            </select>
+            <select id="filter-proxy">
+                <option value="all">All Proxy</option>
+                <option value="with-proxy">With Proxy</option>
+                <option value="without-proxy">Without Proxy</option>
+            </select>
+        </div>
+
+        <div class="profiles-grid" id="profiles-grid">
+            <!-- Профілі будуть тут -->
+        </div>
+    </div>
+
+    <!-- Модальне вікно створення профілю -->
+    <div id="new-profile-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Create New Profile</h2>
+            <form id="new-profile-form">
+                <input type="text" id="profile-name" placeholder="Profile name" required />
+                <button type="submit" class="btn btn-success">Create</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Модальне вікно налаштування проксі -->
+    <div id="proxy-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Configure Proxy</h2>
+            <form id="proxy-form">
+                <input type="text" id="proxy-input" placeholder="host:port:username:password" required />
+                <select id="proxy-type">
+                    <option value="http">HTTP</option>
+                    <option value="https">HTTPS</option>
+                    <option value="socks5">SOCKS5</option>
+                </select>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" id="test-proxy-btn" class="btn btn-warning">🔍 Test Proxy</button>
+                    <button type="submit" class="btn btn-success">💾 Save</button>
+                </div>
+            </form>
+            <div id="proxy-test-result" style="margin-top: 15px; display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Модальне вікно перегляду fingerprint -->
+    <div id="fingerprint-modal" class="modal">
+        <div class="modal-content modal-large">
+            <span class="close">&times;</span>
+            <h2>🖐️ Fingerprint Details: <span id="fp-profile-name"></span></h2>
+            <div id="fingerprint-details" class="fingerprint-grid">
+                <!-- Fingerprint data will be here -->
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button id="regenerate-fp-btn" class="btn btn-primary">🔄 Regenerate Fingerprint</button>
+                <button id="close-fp-modal-btn" class="btn btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

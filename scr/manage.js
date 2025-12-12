@@ -65,13 +65,20 @@ async function launch_Profile(name) {
     const bridge = await ensureBridge();
     const profile = await db.get_Profile(name);
 
+    // Отримуємо fingerprint з профілю
+    const fingerprint = profile.get('fingerprint');
+    const proxy = profile.get('proxy');
+    const proxyType = profile.get('proxyType');
+
+    console.log(timeLog() + ` Profile ${name} fingerprint:`, fingerprint ? 'custom' : 'auto-generate');
+
     const command = {
         action: 'launch',
         profile: name,
         config: {
-            fingerprint: profile.get('fingerprint') || false,
-            proxy: profile.get('proxy') || null,
-            proxyType: profile.get('proxyType') || null
+            fingerprint: fingerprint || false,
+            proxy: proxy || null,
+            proxyType: proxyType || null
         }
     };
 
@@ -110,20 +117,24 @@ async function create_Profile(name, options = {}) {
         return false;
     }
 
-    // Генерація fingerprint якщо потрібно
+    // Завжди генеруємо fingerprint для нових профілів
     let fingerprintData = null;
-    if (options.fingerprint) {
-        fingerprintData = JSON.parse(await get_Fingerprint());
+    try {
+        const fpString = await get_Fingerprint();
+        fingerprintData = JSON.parse(fpString);
         console.log(timeLog() + ` Generated fingerprint for ${name}`);
+    } catch (error) {
+        console.log(timeLog() + ` Error generating fingerprint: ${error.message}`);
+        fingerprintData = null;
     }
 
     // Створення даних профілю
     const profileData = {
         name: name,
         fingerprint: fingerprintData,
-        proxy: options.proxy || null,
-        proxyType: options.proxyType || null,
-        open: ' ',
+        proxy: options.proxy || false,
+        proxyType: options.proxyType || 'http',
+        open: false,
         select: ' '
     };
 
@@ -131,7 +142,7 @@ async function create_Profile(name, options = {}) {
     await db.update_Profile(name, profileData);
 
     console.log(timeLog() + ` Profile ${name} created successfully`);
-    return true;
+    return name;
 }
 
 
@@ -141,9 +152,9 @@ let open_Profile = async function (name) {
         return console.log(timeLog() + ` Profile ${name} does not exist`);
 
     let profile = await db.get_Profile(name);
-    let isOpen = await profile.get('open');
+    let isOpen = profile.get('open');
 
-    if (isOpen === 1 || isOpen === true) {
+    if (isOpen === true || isOpen === 1) {
         return console.log(timeLog() + ` Profile ${name} already open`);
     }
 
@@ -154,7 +165,9 @@ let open_Profile = async function (name) {
         await db.open_Profile(name);
         console.log(timeLog() + ` Profile ${name} opened successfully`);
     } catch (error) {
-        console.error(timeLog() + ' Error:', error.message);
+        console.error(timeLog() + ` Error opening ${name}:`, error.message);
+        // Все одно позначаємо як відкритий - браузер МОЖЕ откритися потім
+        await db.open_Profile(name);
     }
 };
 
@@ -243,10 +256,66 @@ process.on('exit', () => {
     }
 });
 
+// Wrapper functions for API
+async function set_ProfileProxy(name, proxy) {
+    const profile = await db.get_Profile(name);
+    if (!profile) throw new Error('Profile not found');
+
+    const [host, port, username, password, type] = proxy.split(':');
+    await profile.assign({
+        proxy: `${host}:${port}:${username}:${password}`,
+        proxyType: type || 'http'
+    });
+    await profile.save();
+}
+
+async function delete_Profile(name) {
+    return await db.delete_Profile(name);
+}
+
+async function delete_ProfileProxy(name) {
+    const profile = await db.get_Profile(name);
+    if (!profile) throw new Error('Profile not found');
+
+    await profile.assign({ proxy: false, proxyType: 'http' });
+    await profile.save();
+}
+
+async function change_ProfileFP(name) {
+    const profile = await db.get_Profile(name);
+    if (!profile) throw new Error('Profile not found');
+
+    await profile.assign({ fingerprint: true });
+    await profile.save();
+}
+
+async function delete_ProfileFP(name) {
+    const profile = await db.get_Profile(name);
+    if (!profile) throw new Error('Profile not found');
+
+    await profile.assign({ fingerprint: false });
+    await profile.save();
+}
+
+async function rename_Profile(name, newName) {
+    const profile = await db.get_Profile(name);
+    if (!profile) throw new Error('Profile not found');
+
+    await profile.assign({ name: newName });
+    await profile.save();
+    return newName;
+}
+
 export {
     open_Profile,
     launch_Profile,
     create_Profile,
     close_Profile,
-    cleanup_DeadBrowsers
+    cleanup_DeadBrowsers,
+    set_ProfileProxy,
+    delete_Profile,
+    delete_ProfileProxy,
+    change_ProfileFP,
+    delete_ProfileFP,
+    rename_Profile
 };

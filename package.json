@@ -1,1 +1,66 @@
-{"type":"module","dependencies":{"async-lock":"^1.4.1","axios":"^1.7.9","dotenv":"^16.3.1","figlet":"^1.7.0","google-spreadsheet":"^4.1.1","googleapis":"^131.0.0","inquirer":"^8.0.0","limiter":"^2.1.0","playwright":"^1.48.0","socks-proxy-agent":"^8.0.4"}}
+{
+  "name": "antidetect-browser",
+  "version": "1.0.0",
+  "description": "Professional Antidetect Browser Manager",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "npm run dev",
+    "web": "node server.js",
+    "dev": "electron .",
+    "electron": "electron .",
+    "build": "electron-builder",
+    "build-mac": "electron-builder -m",
+    "build-win": "electron-builder -w",
+    "build-linux": "electron-builder -l",
+    "cli": "node scr/cli.js",
+    "migrate": "node scr/migrate-db.js"
+  },
+  "build": {
+    "appId": "com.antidetect.browser",
+    "productName": "Antidetect Browser Manager",
+    "files": [
+      "main.js",
+      "preload.js",
+      "electron.html",
+      "electron-styles.css",
+      "server.js",
+      "scr/**",
+      "storage/**",
+      "node_modules/**"
+    ],
+    "mac": {
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.utilities",
+      "icon": "assets/icon.icns"
+    },
+    "win": {
+      "target": ["NSIS", "portable"],
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icon.png"
+    }
+  },
+  "dependencies": {
+    "async-lock": "^1.4.1",
+    "axios": "^1.13.2",
+    "body-parser": "^2.2.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^5.2.1",
+    "figlet": "^1.7.0",
+    "google-spreadsheet": "^4.1.1",
+    "googleapis": "^131.0.0",
+    "https-proxy-agent": "^7.0.6",
+    "inquirer": "^8.0.0",
+    "limiter": "^2.1.0",
+    "playwright": "^1.48.0",
+    "socket.io": "^4.8.1",
+    "socks-proxy-agent": "^8.0.5"
+  },
+  "devDependencies": {
+    "electron": "^39.2.6",
+    "node-fetch": "^2.7.0"
+  }
+}

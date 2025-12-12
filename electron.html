@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antidetect Browser Manager - Desktop</title>
+    <link rel="stylesheet" href="electron-styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header>
+        <h1>🌐 Antidetect Browser Manager</h1>
+        <div class="header-actions">
+            <span id="status-indicator" style="padding: 5px 10px; background: #c6f6d5; border-radius: 4px; font-size: 12px;">✅ Connected</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <h2>📋 Views</h2>
+            <ul>
+                <li><button onclick="switchView('grid')" class="active">Grid View</button></li>
+                <li><button onclick="switchView('table')">Table View</button></li>
+            </ul>
+
+            <h2>🛠️ Tools</h2>
+            <ul>
+                <li><button onclick="openNewProfileDialog()">➕ New Profile</button></li>
+                <li><button onclick="openProxyManager()">🌐 Proxy Manager</button></li>
+                <li><button onclick="refreshProfiles()">🔄 Refresh</button></li>
+                <li><button onclick="openSettings()">⚙️ Settings</button></li>
+            </ul>
+
+            <h2>📊 Stats</h2>
+            <div class="stats" style="width: 100%;">
+                <div class="stat-card">
+                    <div class="stat-value" id="total-count">0</div>
+                    <div class="stat-label">Total</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="open-count">0</div>
+                    <div class="stat-label">Open</div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <div class="content">
+            <!-- Toolbar -->
+            <div class="toolbar">
+                <button class="btn btn-success" onclick="bulkOpen()">▶️ Open Selected</button>
+                <button class="btn btn-danger" onclick="bulkClose()">⏹️ Close Selected</button>
+                <button class="btn btn-danger" onclick="bulkDelete()">🗑️ Delete Selected</button>
+                <button class="btn btn-secondary" onclick="clearSelection()">✖️ Deselect All</button>
+                <input type="text" id="search-input" placeholder="🔍 Search profiles..." style="padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; flex: 1; max-width: 300px;">
+            </div>
+
+            <!-- Grid View -->
+            <div id="grid-view" class="profiles-grid">
+                <!-- Profiles будуть тут -->
+            </div>
+
+            <!-- Table View (hidden) -->
+            <div id="table-view" style="display: none; flex: 1; overflow-y: auto; padding: 20px;">
+                <table class="profiles-table">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Proxy</th>
+                            <th>FP</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="profiles-tbody">
+                        <!-- Profiles будуть тут -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Profile Modal -->
+    <div id="new-profile-modal" class="modal">
+        <div class="modal-content">
+            <h2>Create New Profile</h2>
+            <form onsubmit="createProfile(event)">
+                <input type="text" id="profile-name" placeholder="Profile name" required>
+                <select id="profile-os">
+                    <option value="macos">macOS</option>
+                    <option value="windows">Windows</option>
+                </select>
+                <div style="display: flex; gap: 10px;">
+                    <button type="submit" class="btn btn-success" style="flex: 1;">Create</button>
+                    <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="closeModal('new-profile-modal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <h2>⚙️ Settings</h2>
+            <form onsubmit="saveSettings(event)">
+                <label>
+                    <input type="checkbox" id="auto-refresh" checked> Auto-refresh every 5 seconds
+                </label>
+                <label>
+                    <input type="checkbox" id="notifications" checked> Show notifications
+                </label>
+                <div style="display: flex; gap: 10px;">
+                    <button type="submit" class="btn btn-success" style="flex: 1;">Save</button>
+                    <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="closeModal('settings-modal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notifications -->
+    <div id="notifications-container"></div>
+
+    <script>
+        let profiles = [];
+        let selectedProfiles = new Set();
+        let currentView = 'grid';
+
+        // IPC invoke для Electron або fallback для веб
+        const invoke = window.ipcRenderer ? window.ipcRenderer.invoke : async (event, ...args) => {
+            // Fallback для веб-версії - але це ELECTRON, тому не потрібен
+            // Якщо не буде window.ipcRenderer - буде помилка
+            throw new Error('IPC not available - make sure you are running in Electron');
+        };
+
+        async function loadProfiles() {
+            try {
+                const data = await window.ipcRenderer.invoke('get-profiles');
+                profiles = data.profiles || [];
+                updateStats();
+                renderProfiles();
+            } catch (error) {
+                console.error('Failed to load profiles:', error);
+                showNotification('Failed to load profiles', 'error');
+            }
+        }
+
+        function updateStats() {
+            document.getElementById('total-count').textContent = profiles.length;
+            document.getElementById('open-count').textContent = profiles.filter(p => p.open).length;
+        }
+
+        function renderProfiles() {
+            if (currentView === 'grid') {
+                renderGridView();
+            } else {
+                renderTableView();
+            }
+        }
+
+        function renderGridView() {
+            const grid = document.getElementById('grid-view');
+            grid.innerHTML = profiles.map(p => `
+                <div class="profile-card ${selectedProfiles.has(p.name) ? 'selected' : ''}">
+                    <div class="profile-header">
+                        <input type="checkbox" ${selectedProfiles.has(p.name) ? 'checked' : ''}
+                               onchange="toggleProfile('${p.name}', this.checked)">
+                        <div style="flex: 1;">
+                            <div class="profile-name">${p.name}</div>
+                            <span class="profile-status ${p.open ? 'status-open' : 'status-closed'}">
+                                ${p.open ? '🟢 OPEN' : '⚫ CLOSED'}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="profile-info">
+                        <div><strong>Proxy:</strong> ${p.proxy ? '✅' : '❌'}</div>
+                        <div><strong>Fingerprint:</strong> ${p.fingerprint ? '✅' : '❌'}</div>
+                    </div>
+                    <div class="profile-actions">
+                        <button class="btn btn-success" onclick="openProfile('${p.name}')" ${p.open ? 'disabled' : ''}>▶️ Open</button>
+                        <button class="btn btn-danger" onclick="closeProfile('${p.name}')" ${!p.open ? 'disabled' : ''}>⏹️ Close</button>
+                        <button class="btn btn-primary" onclick="viewFingerprint('${p.name}')">🖐️ FP</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderTableView() {
+            const tbody = document.getElementById('profiles-tbody');
+            tbody.innerHTML = profiles.map(p => `
+                <tr>
+                    <td><input type="checkbox" ${selectedProfiles.has(p.name) ? 'checked' : ''}
+                               onchange="toggleProfile('${p.name}', this.checked)"></td>
+                    <td>${p.name}</td>
+                    <td>${p.open ? '🟢 OPEN' : '⚫ CLOSED'}</td>
+                    <td>${p.proxy ? '✅' : '❌'}</td>
+                    <td>${p.fingerprint ? '✅' : '❌'}</td>
+                    <td>
+                        <button class="btn btn-success" style="font-size: 11px;" onclick="openProfile('${p.name}')">Open</button>
+                        <button class="btn btn-danger" style="font-size: 11px;" onclick="closeProfile('${p.name}')">Close</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function openProfile(name) {
+            try {
+                const result = await window.ipcRenderer.invoke('open-profile', name);
+                if (result.success) {
+                    showNotification(`Profile ${name} opened`, 'success');
+                    await loadProfiles();
+                } else {
+                    showNotification('Error: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                showNotification('Failed to open profile: ' + error.message, 'error');
+            }
+        }
+
+        async function closeProfile(name) {
+            try {
+                const result = await window.ipcRenderer.invoke('close-profile', name);
+                if (result.success) {
+                    showNotification(`Profile ${name} closed`, 'success');
+                    await loadProfiles();
+                } else {
+                    showNotification('Error: ' + (result.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                showNotification('Failed to close profile: ' + error.message, 'error');
+            }
+        }
+
+        function toggleProfile(name, checked) {
+            if (checked) {
+                selectedProfiles.add(name);
+            } else {
+                selectedProfiles.delete(name);
+            }
+            renderProfiles();
+        }
+
+        async function bulkOpen() {
+            for (const name of selectedProfiles) {
+                await openProfile(name);
+                // Затримка між запусками браузерів (щоб не перевантажити CPU)
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            selectedProfiles.clear();
+            renderProfiles();
+        }
+
+        async function bulkClose() {
+            for (const name of selectedProfiles) {
+                await closeProfile(name);
+                // Менша затримка при закритті (швидше)
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            selectedProfiles.clear();
+            renderProfiles();
+        }
+
+        function bulkDelete() {
+            if (!confirm(`Delete ${selectedProfiles.size} profile(s)?`)) return;
+            // TODO: implement delete
+        }
+
+        function clearSelection() {
+            selectedProfiles.clear();
+            renderProfiles();
+        }
+
+        function switchView(view) {
+            currentView = view;
+            document.getElementById('grid-view').style.display = view === 'grid' ? 'grid' : 'none';
+            document.getElementById('table-view').style.display = view === 'table' ? 'block' : 'none';
+            renderProfiles();
+        }
+
+        function openNewProfileDialog() {
+            document.getElementById('new-profile-modal').classList.add('show');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        function openSettings() {
+            document.getElementById('settings-modal').classList.add('show');
+        }
+
+        function openProxyManager() {
+            // TODO: open proxy manager
+            alert('Proxy Manager - coming soon');
+        }
+
+        function refreshProfiles() {
+            loadProfiles();
+        }
+
+        function showNotification(message, type = 'info') {
+            const container = document.getElementById('notifications-container');
+            const notif = document.createElement('div');
+            notif.className = `notification ${type}`;
+            notif.textContent = message;
+            container.appendChild(notif);
+            setTimeout(() => notif.remove(), 3000);
+        }
+
+        async function createProfile(event) {
+            event.preventDefault();
+            const name = document.getElementById('profile-name').value;
+            const os = document.getElementById('profile-os').value;
+
+            if (!name.trim()) {
+                showNotification('Enter profile name', 'error');
+                return;
+            }
+
+            try {
+                const result = await window.ipcRenderer.invoke('create-profile', name, os);
+
+                if (result && result.success) {
+                    showNotification(`Profile "${name}" created`, 'success');
+                    document.getElementById('profile-name').value = '';
+                    closeModal('new-profile-modal');
+                    await loadProfiles();
+                } else {
+                    showNotification('Error: ' + (result?.error || 'Unknown error'), 'error');
+                }
+            } catch (error) {
+                showNotification('Failed to create profile: ' + error.message, 'error');
+                console.error('Create profile error:', error);
+            }
+        }
+
+        function saveSettings(event) {
+            event.preventDefault();
+            showNotification('Settings saved', 'success');
+            closeModal('settings-modal');
+        }
+
+        // Initialize
+        loadProfiles();
+        setInterval(loadProfiles, 5000); // Auto-refresh
+    </script>
+</body>
+</html>
+

@@ -99,7 +99,15 @@ async function get_Profile(name) {
 async function open_Profile(name) {
     const profile = await get_Profile(name);
     if (profile) {
-        await profile.assign({ open: 1 });
+        await profile.assign({ open: true });
+        await profile.save();
+    }
+}
+
+async function close_Profile(name) {
+    const profile = await get_Profile(name);
+    if (profile) {
+        await profile.assign({ open: false });
         await profile.save();
     }
 }
@@ -137,12 +145,5 @@ function get_Engines() {
     return fs.readdirSync(enginesDir);
 }
 
-async function close_Profile(name) {
-    const profile = await get_Profile(name);
-    if (profile) {
-        await profile.assign({ open: false });
-        await profile.save();
-    }
-}
 
 export { update_Profile, check_Profile, get_Profile, open_Profile, close_Profile, delete_Profile, get_Selected, get_Profiles, get_Engines };
