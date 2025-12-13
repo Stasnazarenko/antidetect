@@ -105,14 +105,18 @@ class BrowserManager:
 
                 # Тепер перевіряємо чи профіль відкритий
                 if profile_name in self.browsers:
+                    print(f"[BRIDGE] Profile {profile_name} already open", file=sys.stderr)
                     return {"success": False, "error": "Profile already open"}
 
                 profile_path = self.profiles_dir / profile_name
                 profile_path.mkdir(exist_ok=True)
 
-                # Використовуємо базовий конфіг для генерації fingerprint
                 os_type = "macos"  # Генеруємо для macOS
-                fingerprint_config = self._get_fingerprint_config(os_type)
+                # fingerprint: використовуємо dict якщо є, інакше дефолт
+                if "fingerprint" in config and isinstance(config["fingerprint"], dict):
+                    fingerprint_config = self._convert_db_fingerprint(config["fingerprint"])
+                else:
+                    fingerprint_config = self._get_fingerprint_config(os_type)
 
                 launch_config = {
                     "headless": False,
@@ -123,15 +127,193 @@ class BrowserManager:
                     "i_know_what_im_doing": True
                 }
 
-                if "proxy" in config and config["proxy"]:
-                    launch_config["proxy"] = config["proxy"]
+                # Нормалізація проксі: приймаємо рядок (json або host:port...) або dict
+                proxy_raw = config.get("proxy")
+                if proxy_raw:
+                    proxy_obj = self._normalize_proxy(proxy_raw)
+                    if proxy_obj:
+                        launch_config["proxy"] = proxy_obj
+                    else:
+                        print(f"[BRIDGE] Invalid proxy format for profile {profile_name}: {proxy_raw}", file=sys.stderr)
+                        return {"success": False, "error": "Invalid proxy format", "proxy": proxy_raw}
 
-                camoufox = AsyncCamoufox(**launch_config)
-                browser = await camoufox.start()
+                # Логуємо конфіг для дебагу
+                try:
+                    print(f"[BRIDGE] Launch config for {profile_name}: {json.dumps(launch_config, indent=2)}", file=sys.stderr)
+                except Exception:
+                    print(f"[BRIDGE] Launch config (non-serializable) for {profile_name}", file=sys.stderr)
 
-                # Отримуємо існуючу сторінку
-                pages = browser.pages
-                page = pages[0] if pages else await browser.new_page()
+                camoufox = None
+                browser = None
+
+                # Якщо є проксі — спробувати кілька варіантів формату, поки один не спрацює
+                if "proxy" in launch_config:
+                    proxy_try = launch_config.get("proxy")
+                    attempts = []
+
+                    # 1) як dict (server, username, password, type)
+                    attempts.append(proxy_try)
+
+                    # 2) як URL string з авторизацією або без
+                    if isinstance(proxy_try, dict):
+                        server = proxy_try.get('server')
+                        typ = proxy_try.get('type', 'http')
+                        user = proxy_try.get('username')
+                        pwd = proxy_try.get('password')
+                        if user and pwd:
+                            attempts.append(f"{typ}://{user}:{pwd}@{server}")
+                        attempts.append(f"{typ}://{server}")
+                        # також plain host:port
+                        attempts.append(server)
+                    elif isinstance(proxy_try, str):
+                        attempts.append(proxy_try)
+
+                    last_error = None
+                    success = False
+
+                    for idx, attempt_proxy in enumerate(attempts):
+                        try:
+                            trial_config = dict(launch_config)
+                            trial_config['proxy'] = attempt_proxy
+
+                            try:
+                                print(f"[BRIDGE] Trying proxy format #{idx+1} for {profile_name}: {attempt_proxy}", file=sys.stderr)
+                            except Exception:
+                                pass
+
+                            camoufox = AsyncCamoufox(**trial_config)
+                            try:
+                                browser = await camoufox.start()
+                            except Exception as e:
+                                last_error = str(e)
+                                print(f"[BRIDGE] camoufox.start() failed on attempt #{idx+1}: {e}", file=sys.stderr)
+                                # attempt to stop camoufox if available
+                                try:
+                                    if hasattr(camoufox, 'stop'):
+                                        await camoufox.stop()
+                                except Exception:
+                                    pass
+                                continue
+
+                            # short settle
+                            try:
+                                await asyncio.sleep(0.5)
+                            except Exception:
+                                pass
+
+                            # check by trying to get/create a page instead of is_connected
+                            page = None
+                            try:
+                                pages = getattr(browser, 'pages', None)
+                                if pages and len(pages) > 0:
+                                    page = pages[0]
+                                else:
+                                    page = await browser.new_page()
+                            except Exception as e:
+                                last_error = str(e)
+                                print(f"[BRIDGE] Failed to get/create page on attempt #{idx+1}: {e}", file=sys.stderr)
+                                # cleanup
+                                try:
+                                    if hasattr(browser, 'close'):
+                                        await browser.close()
+                                except Exception:
+                                    pass
+                                try:
+                                    if hasattr(camoufox, 'stop'):
+                                        await camoufox.stop()
+                                except Exception:
+                                    pass
+                                continue
+
+                            # If we have a page - success
+                            if page:
+                                launch_config['proxy'] = attempt_proxy
+                                success = True
+                                # store browser and page to reuse after loop
+                                final_browser = browser
+                                final_camoufox = camoufox
+                                final_page = page
+                                print(f"[BRIDGE] Proxy attempt #{idx+1} worked for {profile_name}", file=sys.stderr)
+                                break
+                            else:
+                                last_error = 'no page available after start'
+                                print(f"[BRIDGE] No page available after start on attempt #{idx+1}", file=sys.stderr)
+                                # cleanup
+                                try:
+                                    if hasattr(browser, 'close'):
+                                        await browser.close()
+                                except Exception:
+                                    pass
+                                try:
+                                    if hasattr(camoufox, 'stop'):
+                                        await camoufox.stop()
+                                except Exception:
+                                    pass
+                                continue
+
+                        except Exception as e:
+                            last_error = str(e)
+                            print(f"[BRIDGE] Exception during proxy attempt #{idx+1}: {e}", file=sys.stderr)
+                            try:
+                                if camoufox and hasattr(camoufox, 'stop'):
+                                    await camoufox.stop()
+                            except Exception:
+                                pass
+                            continue
+
+                    if not success:
+                        print(f"[BRIDGE] All proxy attempts failed for {profile_name}, last error: {last_error}", file=sys.stderr)
+                        return {"success": False, "error": "Browser failed to start/connect with proxy", "detail": last_error, "proxy_attempts": attempts}
+
+                else:
+                    # без проксі — звичайний старт
+                    try:
+                        camoufox = AsyncCamoufox(**launch_config)
+                        browser = await camoufox.start()
+                    except Exception as e:
+                        print(f"[BRIDGE] Camoufox.start failed for {profile_name}: {e}", file=sys.stderr)
+                        return {"success": False, "error": "Failed to start browser", "detail": str(e), "trace": traceback.format_exc()}
+
+                    # Try to get or create a page - treat success if we can create a page
+                    try:
+                        pages = getattr(browser, 'pages', None)
+                        if pages and len(pages) > 0:
+                            page = pages[0]
+                        else:
+                            page = await browser.new_page()
+                    except Exception as e:
+                        print(f"[BRIDGE] Failed to get/create page for {profile_name}: {e}", file=sys.stderr)
+                        try:
+                            if hasattr(browser, 'close'):
+                                await browser.close()
+                        except Exception:
+                            pass
+                        try:
+                            if hasattr(camoufox, 'stop'):
+                                await camoufox.stop()
+                        except Exception:
+                            pass
+                        return {"success": False, "error": "Browser failed to initialize page after start", "detail": str(e)}
+
+                    # assign final references for consistency
+                    final_browser = browser
+                    final_camoufox = camoufox
+                    final_page = page
+
+                # після успішного старту browser має бути встановлено
+                if not (final_browser and final_page):
+                    return {"success": False, "error": "Browser object not created or no page", "proxy_used": launch_config.get('proxy')}
+
+                # Невелика пауза, щоб процес устаканився
+                try:
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+
+                # Отримуємо існуючу сторінку і зберігаємо об'єкти
+                browser = final_browser
+                page = final_page
+                camoufox = final_camoufox
 
                 self.browsers[profile_name] = {
                     "browser": browser,
@@ -140,75 +322,96 @@ class BrowserManager:
                     "camoufox": camoufox
                 }
 
+                print(f"[BRIDGE] Profile {profile_name} launched successfully", file=sys.stderr)
                 return {"success": True, "profile": profile_name, "os": os_type}
 
             except Exception as e:
+                print(f"[BRIDGE] Exception launching profile {profile_name}: {e}\n{traceback.format_exc()}", file=sys.stderr)
                 return {"success": False, "error": str(e), "trace": traceback.format_exc()}
 
     def _convert_db_fingerprint(self, db_fp: dict):
-        """Конвертує складний fingerprint з БД в простий для Camoufox"""
+        """Конвертує fingerprint з БД у простий для Camoufox (window.*, navigator.*)"""
         config = {}
-
-        # OS Version - беремо перший preferred або середнє між min/max
-        if "osVersion" in db_fp:
-            os_version = db_fp["osVersion"]
-            if isinstance(os_version, dict):
-                if "preferred" in os_version and os_version["preferred"]:
-                    config["osVersion"] = os_version["preferred"][0]
-                elif "min" in os_version:
-                    config["osVersion"] = os_version["min"]
-            else:
-                config["osVersion"] = os_version
-
-        # Screen - беремо перший preferred або середні значення
-        if "screen" in db_fp:
-            screen = db_fp["screen"]
-            if isinstance(screen, dict):
-                if "preferred" in screen and screen["preferred"] and len(screen["preferred"]) > 0:
-                    # Беремо перший preferred екран
-                    preferred = screen["preferred"][0]
-                    config["screen"] = {
-                        "minWidth": preferred[0],
-                        "maxWidth": preferred[0],
-                        "minHeight": preferred[1],
-                        "maxHeight": preferred[1]
-                    }
-                elif "minWidth" in screen:
-                    config["screen"] = {
-                        "minWidth": screen["minWidth"],
-                        "maxWidth": screen.get("maxWidth", screen["minWidth"]),
-                        "minHeight": screen["minHeight"],
-                        "maxHeight": screen.get("maxHeight", screen["minHeight"])
-                    }
-
-        # Hardware Concurrency - беремо preferred або середнє
-        if "hardwareConcurrency" in db_fp:
-            hw = db_fp["hardwareConcurrency"]
-            if isinstance(hw, dict):
-                if "preferred" in hw and hw["preferred"]:
-                    config["hardwareConcurrency"] = hw["preferred"][0]
-                elif "min" in hw and "max" in hw:
-                    config["hardwareConcurrency"] = (hw["min"] + hw["max"]) // 2
-            else:
-                config["hardwareConcurrency"] = hw
-
-        # Device Memory - беремо preferred або середнє
-        if "deviceMemory" in db_fp:
-            mem = db_fp["deviceMemory"]
-            if isinstance(mem, dict):
-                if "preferred" in mem and mem["preferred"]:
-                    config["deviceMemory"] = mem["preferred"][0]
-                elif "min" in mem and "max" in mem:
-                    config["deviceMemory"] = (mem["min"] + mem["max"]) // 2
-            else:
-                config["deviceMemory"] = mem
-
-        # Прості поля
-        for key in ["geoip", "humanize", "headless", "block_images", "block_media"]:
-            if key in db_fp:
+        # Витягуємо тільки window.* та navigator.*
+        for key in db_fp:
+            if key.startswith('window.') or key.startswith('navigator.'):
                 config[key] = db_fp[key]
-
+            # Додаємо підтримку product, productSub, maxTouchPoints (якщо є)
+            if key in ["product", "productSub", "maxTouchPoints"]:
+                config[f"navigator.{key}"] = db_fp[key]
         return config
+
+    def _normalize_proxy(self, proxy_raw):
+        """Normalize proxy input into a dict acceptable for Camoufox or return None if invalid.
+        Returns dict with keys: server (host:port), username (optional), password (optional), type (http/socks5)
+        """
+        if not proxy_raw:
+            return None
+
+        proxy_obj = None
+        # Якщо отримали вже dict — копіюємо
+        if isinstance(proxy_raw, dict):
+            proxy_obj = proxy_raw.copy()
+        elif isinstance(proxy_raw, str):
+            # Спробуємо розпарсити як URL
+            try:
+                from urllib.parse import urlparse
+                p = urlparse(proxy_raw)
+                if p.scheme and (p.hostname or p.netloc):
+                    scheme = p.scheme
+                    host = p.hostname or ''
+                    port = p.port
+                    username = p.username
+                    password = p.password
+                    if host and port:
+                        proxy_obj = { 'server': f"{host}:{port}", 'type': scheme }
+                        if username:
+                            proxy_obj['username'] = username
+                        if password:
+                            proxy_obj['password'] = password
+                else:
+                    # Не схема — формат user:pass@host:port або host:port
+                    import re
+                    m = re.match(r'(?:(?P<user>[^:@]+):(?P<pass>[^@]+)@)?(?P<host>[^:]+):(?P<port>\d+)$', proxy_raw)
+                    if m:
+                        host = m.group('host')
+                        port = m.group('port')
+                        user = m.group('user')
+                        pwd = m.group('pass')
+                        proxy_obj = { 'server': f"{host}:{port}", 'type': 'http' }
+                        if user:
+                            proxy_obj['username'] = user
+                        if pwd:
+                            proxy_obj['password'] = pwd
+                    else:
+                        # як останній варіант — якщо просто host без порту, відкидаємо
+                        proxy_obj = None
+            except Exception:
+                proxy_obj = None
+        else:
+            return None
+
+        if not proxy_obj:
+            return None
+
+        # Нормалізація полів: якщо є server у вигляді URL, витягнути host:port
+        server = proxy_obj.get('server')
+        if server and isinstance(server, str):
+            # Якщо випадково має 'http://' чи 'socks5://' — видалимо
+            for prefix in ('http://', 'https://', 'socks5://', 'socks4://'):
+                if server.startswith(prefix):
+                    server = server[len(prefix):]
+            proxy_obj['server'] = server
+
+        # Переконаємось, що server виглядає як host:port
+        if 'server' in proxy_obj and isinstance(proxy_obj['server'], str) and ':' in proxy_obj['server']:
+            # Встановити тип за замовчуванням
+            if 'type' not in proxy_obj or not proxy_obj['type']:
+                proxy_obj['type'] = 'http'
+            # Уникнути лишніх полів
+            return {k: proxy_obj[k] for k in ('server', 'username', 'password', 'type') if k in proxy_obj}
+
+        return None
 
     async def close_profile(self, profile_name: str):
         try:
@@ -292,10 +495,19 @@ async def main():
             command = json.loads(line.strip())
             action = command.get("action")
 
+            # Нормалізуємо config: іноді отримуємо JSON-рядок всередині поля config
+            cfg = command.get("config", {})
+            if isinstance(cfg, str):
+                try:
+                    cfg = json.loads(cfg)
+                except Exception:
+                    # якщо не вдається розпарсити — замінюємо на пустий dict
+                    cfg = {}
+
             if action == "launch":
                 result = await manager.launch_profile(
                     command.get("profile"),
-                    command.get("config", {})
+                    cfg
                 )
                 sys.stdout.write(json.dumps(result) + "\n")
                 sys.stdout.flush()

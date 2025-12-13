@@ -14,55 +14,6 @@
     <div class="container">
         <div id="proxies-list"></div>
         <button id="add-proxy-btn" class="btn btn-success">Add Proxy</button>
-        <!-- Filters and search -->
-        <div style="margin: 20px 0; display: flex; gap: 10px;">
-            <input type="text" id="search-proxy" placeholder="Search by host..." style="flex:1;">
-            <select id="filter-status">
-                <option value="all">All Statuses</option>
-                <option value="active">Active</option>
-                <option value="failed">Failed</option>
-                <option value="inactive">Untested</option>
-            </select>
-            <select id="filter-type">
-                <option value="all">All Types</option>
-                <option value="http">HTTP/HTTPS</option>
-                <option value="socks5">SOCKS5</option>
-            </select>
-            <input type="text" id="filter-tag" placeholder="Tag filter..." style="width:120px;">
-        </div>
-        <!-- Modal for new proxy -->
-        <div id="new-proxy-modal" class="modal" style="display:none;">
-            <div class="modal-content">
-                <h2>Add Proxy</h2>
-                <form id="new-proxy-form">
-                    <input type="text" id="proxy-host" placeholder="Host" required>
-                    <input type="text" id="proxy-port" placeholder="Port" required>
-                    <input type="text" id="proxy-username" placeholder="Username">
-                    <input type="text" id="proxy-password" placeholder="Password">
-                    <select id="proxy-type-select">
-                        <option value="http">HTTP/HTTPS</option>
-                        <option value="socks5">SOCKS5</option>
-                    </select>
-                    <input type="text" id="proxy-tags-input" placeholder="Tags (comma separated)">
-                    <div style="display: flex; gap: 10px;">
-                        <button type="submit" class="btn btn-success" style="flex: 1;">Save</button>
-                        <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="document.getElementById('new-proxy-modal').style.display='none'">Cancel</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-        <!-- Import modal -->
-        <div id="import-modal" class="modal" style="display:none;">
-            <div class="modal-content">
-                <h2>Import Proxies</h2>
-                <textarea id="import-textarea" rows="6" style="width:100%;"></textarea>
-                <div style="display: flex; gap: 10px; margin-top: 10px;">
-                    <button id="import-submit-btn" class="btn btn-success" style="flex:1;">Import</button>
-                    <button type="button" class="btn btn-secondary" style="flex:1;" onclick="document.getElementById('import-modal').style.display='none'">Cancel</button>
-                </div>
-            </div>
-        </div>
-        <button id="import-proxies-btn" class="btn btn-secondary" style="margin-top:10px;">Import Proxies</button>
     </div>
     <div id="proxy-modal" class="modal" style="display:none;">
         <div class="modal-content">
@@ -87,3 +38,4 @@
     <script src="proxy-manager.js"></script>
 </body>
 </html>
+
