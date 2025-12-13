@@ -552,6 +552,11 @@ cleanupBtn.addEventListener('click', async () => {
     }
 });
 
+// Додаємо відкриття Proxy Manager для Electron (і Web)
+function openProxyManager() {
+    window.open('proxy-manager.html', '_blank', 'width=900,height=700');
+}
+
 // Event listeners
 newProfileBtn.addEventListener('click', () => {
     newProfileModal.style.display = 'block';
@@ -619,9 +624,46 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
+// Додаємо editProxy
+function editProxy(name) {
+    const profile = profiles.find(p => p.name === name);
+    if (!profile) return;
+    document.getElementById('edit-proxy-host').value = profile.proxy ? (profile.proxy.split(':')[0] || '') : '';
+    document.getElementById('edit-proxy-port').value = profile.proxy ? (profile.proxy.split(':')[1] || '') : '';
+    document.getElementById('edit-proxy-username').value = profile.proxy ? (profile.proxy.split(':')[2] || '') : '';
+    document.getElementById('edit-proxy-password').value = profile.proxy ? (profile.proxy.split(':')[3] || '') : '';
+    document.getElementById('edit-proxy-type').value = profile.proxyType || 'http';
+    document.getElementById('edit-proxy-form').onsubmit = async function(e) {
+        e.preventDefault();
+        const host = document.getElementById('edit-proxy-host').value;
+        const port = document.getElementById('edit-proxy-port').value;
+        const username = document.getElementById('edit-proxy-username').value;
+        const password = document.getElementById('edit-proxy-password').value;
+        const type = document.getElementById('edit-proxy-type').value;
+        const proxyString = `${host}:${port}:${username}:${password}:${type}`;
+        try {
+            const response = await fetch(`/api/profiles/${name}/proxy`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ proxy: proxyString })
+            });
+            const data = await response.json();
+            if (data.success) {
+                showNotification('Proxy updated', 'success');
+                closeModal('edit-proxy-modal');
+                await loadProfiles();
+            } else {
+                showNotification(data.error || 'Failed to update proxy', 'error');
+            }
+        } catch (error) {
+            showNotification('Failed to update proxy', 'error');
+        }
+    };
+    document.getElementById('edit-proxy-modal').classList.add('show');
+}
+
 // Завантажити профілі при старті
 loadProfiles();
 
 // Оновлювати кожні 5 секунд
 setInterval(loadProfiles, 5000);
-

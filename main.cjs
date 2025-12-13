@@ -95,6 +95,36 @@ function createWindow() {
     });
 }
 
+// Proxy storage file
+const proxyStorePath = path.join(__dirname, 'storage', 'proxies.json');
+
+function getProxies() {
+    if (!fs.existsSync(proxyStorePath)) return [];
+    try {
+        return JSON.parse(fs.readFileSync(proxyStorePath, 'utf-8'));
+    } catch (e) {
+        return [];
+    }
+}
+function saveProxies(proxies) {
+    fs.writeFileSync(proxyStorePath, JSON.stringify(proxies, null, 2));
+}
+
+function createProxyManagerWindow() {
+    const win = new BrowserWindow({
+        width: 900,
+        height: 700,
+        title: 'Proxy Manager',
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.cjs'),
+            sandbox: true
+        }
+    });
+    win.loadFile('proxy-manager.html');
+}
+
 // Electron lifecycle
 app.on('ready', async () => {
     console.log('[Main] App ready, starting...');
@@ -202,18 +232,50 @@ ipcMain.handle('close-profile', async (event, name) => {
     }
 });
 
-ipcMain.handle('create-profile', async (event, name, os) => {
+ipcMain.handle('create-profile', async (event, name, os, proxy) => {
     try {
+        // Створити профіль
         const response = await fetch(`http://localhost:3000/api/profiles`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, os }),
             timeout: 10000
         });
-        return await response.json();
+        const data = await response.json();
+        if (!data.success) return data;
+        // Якщо проксі задано, одразу зберігаємо його
+        if (proxy && proxy.host && proxy.port) {
+            const proxyString = `${proxy.host}:${proxy.port}:${proxy.username || ''}:${proxy.password || ''}:${proxy.type || 'http'}`;
+            await fetch(`http://localhost:3000/api/profiles/${name}/proxy`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ proxy: proxyString }),
+                timeout: 10000
+            });
+        }
+        return data;
     } catch (error) {
         return { success: false, error: error.message };
     }
+});
+
+ipcMain.handle('open-proxy-manager', () => {
+    createProxyManagerWindow();
+});
+ipcMain.handle('get-proxies', () => {
+    return getProxies();
+});
+ipcMain.handle('add-proxy', (event, proxy) => {
+    const proxies = getProxies();
+    proxies.push(proxy);
+    saveProxies(proxies);
+    return { success: true };
+});
+ipcMain.handle('delete-proxy', (event, id) => {
+    let proxies = getProxies();
+    proxies = proxies.filter(p => p.id !== id);
+    saveProxies(proxies);
+    return { success: true };
 });
 
 // Меню
@@ -257,4 +319,3 @@ const template = [
 
 const menu = Menu.buildFromTemplate(template);
 Menu.setApplicationMenu(menu);
-

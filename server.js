@@ -3,7 +3,6 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import bodyParser from 'body-parser';
-import * as manage from './scr/manage.js';
 import * as db from './scr/db.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -25,6 +24,9 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ==================== API ENDPOINTS ====================
+// Динамічно імпортуємо manage для ESM
+let manage;
+(async () => { manage = await import('./scr/manage.js'); })();
 
 // Отримати список профілів
 app.get('/api/profiles', async (req, res) => {
@@ -132,10 +134,8 @@ app.post('/api/profiles/:name/proxy', async (req, res) => {
     try {
         const { name } = req.params;
         const { proxy } = req.body;
-
         await manage.set_ProfileProxy(name, proxy);
         io.emit('profile_updated', { name, field: 'proxy' });
-
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
@@ -175,17 +175,41 @@ app.post('/api/profiles/:name/proxy/test', async (req, res) => {
 });
 
 // Helper для тестування проксі
+import { SocksProxyAgent } from 'socks-proxy-agent';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import axios from 'axios';
+
 async function testProxy(proxyString) {
     try {
-        const axios = require('axios');
-        const { SocksProxyAgent } = require('socks-proxy-agent');
-        const { HttpsProxyAgent } = require('https-proxy-agent');
-
-        const [host, port, username, password, type = 'http'] = proxyString.split(':');
-
+        // Очікуємо: host:port:username:password:type
+        let [host, port, username, password, type] = proxyString.split(':');
+        if (!type) type = 'http';
+        // Якщо host містить ip:port:username:password:тип, але host вже містить порт, username, password, type буде undefined
+        // Якщо host містить схему, видалити її
+        if (host) {
+            host = host.trim();
+            // Якщо host містить схему (http://, https://, socks5://), видалити
+            host = host.replace(/^(http|https|socks5):\/\//i, '');
+            // Якщо host містить ще раз схему (http:, socks5:), видалити всі повтори
+            while (/^(http|https|socks5):/i.test(host)) {
+                host = host.replace(/^(http|https|socks5):/i, '');
+            }
+            // Якщо host містить схему всередині (http://http://...), видалити всі повтори
+            host = host.replace(/(http|https|socks5):\/\//gi, '');
+            host = host.replace(/(http|https|socks5):/gi, '');
+            host = host.replace(/^\s+|\s+$/g, '');
+        }
+        // Якщо порт не число, можливо host містить порт (наприклад, host = '89.33.245.223:5613')
+        if (port && isNaN(Number(port))) {
+            // Спробувати розпарсити host ще раз
+            const hostParts = host.split(':');
+            host = hostParts[0];
+            port = hostParts[1] || '';
+            username = hostParts[2] || username;
+            password = hostParts[3] || password;
+        }
         let agent;
         let proxyUrl;
-
         if (type === 'socks5') {
             proxyUrl = username && password
                 ? `socks5://${username}:${password}@${host}:${port}`
@@ -197,21 +221,16 @@ async function testProxy(proxyString) {
                 : `http://${host}:${port}`;
             agent = new HttpsProxyAgent(proxyUrl);
         }
-
         const startTime = Date.now();
-
         // Тестуємо з'єднання
         const response = await axios.get('https://api.ipify.org?format=json', {
             httpsAgent: agent,
             httpAgent: agent,
             timeout: 10000
         });
-
         const responseTime = Date.now() - startTime;
-
         // Отримуємо геолокацію IP
         const geoResponse = await axios.get(`http://ip-api.com/json/${response.data.ip}`);
-
         return {
             success: true,
             ip: response.data.ip,

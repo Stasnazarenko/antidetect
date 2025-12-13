@@ -277,10 +277,12 @@ process.on('exit', () => {
 async function set_ProfileProxy(name, proxy) {
     const profile = await db.get_Profile(name);
     if (!profile) throw new Error('Profile not found');
-
+    if (!proxy) throw new Error('Proxy string is empty');
+    // Очікуємо формат: host:port:username:password:type
     const [host, port, username, password, type] = proxy.split(':');
+    if (!host || !port) throw new Error('Proxy must have host and port');
     await profile.assign({
-        proxy: `${host}:${port}:${username}:${password}`,
+        proxy: `${host}:${port}:${username || ''}:${password || ''}`,
         proxyType: type || 'http'
     });
     await profile.save();
@@ -323,4 +325,4 @@ async function rename_Profile(name, newName) {
     return newName;
 }
 
-export { create_Profile, open_Profile, close_Profile, active };
+export { create_Profile, open_Profile, close_Profile, active, set_ProfileProxy };

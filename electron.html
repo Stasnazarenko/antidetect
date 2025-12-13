@@ -92,9 +92,40 @@
                     <option value="macos">macOS</option>
                     <option value="windows">Windows</option>
                 </select>
-                <div style="display: flex; gap: 10px;">
+                <hr style="margin: 10px 0;">
+                <h3>Proxy (optional)</h3>
+                <input type="text" id="profile-proxy-host" placeholder="Proxy host">
+                <input type="text" id="profile-proxy-port" placeholder="Proxy port">
+                <input type="text" id="profile-proxy-username" placeholder="Proxy username">
+                <input type="text" id="profile-proxy-password" placeholder="Proxy password">
+                <select id="profile-proxy-type">
+                    <option value="http">HTTP/HTTPS</option>
+                    <option value="socks5">SOCKS5</option>
+                </select>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
                     <button type="submit" class="btn btn-success" style="flex: 1;">Create</button>
                     <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="closeModal('new-profile-modal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Proxy Modal -->
+    <div id="edit-proxy-modal" class="modal">
+        <div class="modal-content">
+            <h2>Edit Proxy</h2>
+            <form id="edit-proxy-form">
+                <input type="text" id="edit-proxy-host" placeholder="Proxy host">
+                <input type="text" id="edit-proxy-port" placeholder="Proxy port">
+                <input type="text" id="edit-proxy-username" placeholder="Proxy username">
+                <input type="text" id="edit-proxy-password" placeholder="Proxy password">
+                <select id="edit-proxy-type">
+                    <option value="http">HTTP/HTTPS</option>
+                    <option value="socks5">SOCKS5</option>
+                </select>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button type="submit" class="btn btn-success" style="flex: 1;">Save</button>
+                    <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="closeModal('edit-proxy-modal')">Cancel</button>
                 </div>
             </form>
         </div>
@@ -312,6 +343,11 @@
             event.preventDefault();
             const name = document.getElementById('profile-name').value;
             const os = document.getElementById('profile-os').value;
+            const proxyHost = document.getElementById('profile-proxy-host').value;
+            const proxyPort = document.getElementById('profile-proxy-port').value;
+            const proxyUser = document.getElementById('profile-proxy-username').value;
+            const proxyPass = document.getElementById('profile-proxy-password').value;
+            const proxyType = document.getElementById('profile-proxy-type').value;
 
             if (!name.trim()) {
                 showNotification('Enter profile name', 'error');
@@ -319,11 +355,21 @@
             }
 
             try {
-                const result = await window.ipcRenderer.invoke('create-profile', name, os);
+                const result = await window.ipcRenderer.invoke('create-profile', name, os, {
+                    host: proxyHost,
+                    port: proxyPort,
+                    username: proxyUser,
+                    password: proxyPass,
+                    type: proxyType
+                });
 
                 if (result && result.success) {
                     showNotification(`Profile "${name}" created`, 'success');
                     document.getElementById('profile-name').value = '';
+                    document.getElementById('profile-proxy-host').value = '';
+                    document.getElementById('profile-proxy-port').value = '';
+                    document.getElementById('profile-proxy-username').value = '';
+                    document.getElementById('profile-proxy-password').value = '';
                     closeModal('new-profile-modal');
                     await loadProfiles();
                 } else {
@@ -347,4 +393,3 @@
     </script>
 </body>
 </html>
-

@@ -3,6 +3,39 @@ const socket = io();
 let proxies = [];
 let currentProxy = null;
 
+// IPC API for Electron
+const { ipcRenderer } = window;
+
+async function fetchProxies() {
+    if (ipcRenderer && ipcRenderer.invoke) {
+        return await ipcRenderer.invoke('get-proxies');
+    }
+    // fallback for web: localStorage
+    const stored = localStorage.getItem('proxies');
+    return stored ? JSON.parse(stored) : [];
+}
+async function saveProxy(proxy) {
+    if (ipcRenderer && ipcRenderer.invoke) {
+        await ipcRenderer.invoke('add-proxy', proxy);
+        if (ipcRenderer.send) ipcRenderer.send('proxies-updated');
+        return;
+    }
+    // fallback for web
+    let proxies = await fetchProxies();
+    proxies.push(proxy);
+    localStorage.setItem('proxies', JSON.stringify(proxies));
+}
+async function removeProxy(id) {
+    if (ipcRenderer && ipcRenderer.invoke) {
+        await ipcRenderer.invoke('delete-proxy', id);
+        if (ipcRenderer.send) ipcRenderer.send('proxies-updated');
+        return;
+    }
+    let proxies = await fetchProxies();
+    proxies = proxies.filter(p => p.id !== id);
+    localStorage.setItem('proxies', JSON.stringify(proxies));
+}
+
 // Завантажити проксі з localStorage
 function loadProxies() {
     const stored = localStorage.getItem('proxies');
@@ -105,6 +138,23 @@ function renderProxies() {
     }).join('');
 }
 
+// Форматування проксі-рядка для тесту (видалити схему, якщо є)
+function formatProxyString(proxy) {
+    let host = proxy.host.trim();
+    // Видалити всі можливі схеми (http://, https://, socks5://, http:, https:, socks5:)
+    host = host.replace(/^(http|https|socks5):\/\//i, '');
+    while (/^(http|https|socks5):/i.test(host)) {
+        host = host.replace(/^(http|https|socks5):/i, '');
+    }
+    // Якщо host містить ще раз схему всередині (наприклад, http://http://...), видалити всі повтори
+    host = host.replace(/(http|https|socks5):\/\//gi, '');
+    host = host.replace(/(http|https|socks5):/gi, '');
+    // Якщо host містить пробіли або випадкові символи на початку/кінці, обрізати
+    host = host.replace(/^\s+|\s+$/g, '');
+    // Якщо host містить тільки ip:port:username, не додавати :undefined
+    return [host, proxy.port, proxy.username || '', proxy.password || '', proxy.type].filter(Boolean).join(':');
+}
+
 // Додати проксі
 document.getElementById('new-proxy-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -142,25 +192,20 @@ async function testProxy(id) {
     renderProxies();
 
     try {
-        const proxyString = `${proxy.host}:${proxy.port}:${proxy.username}:${proxy.password}:${proxy.type}`;
-
+        const proxyString = formatProxyString(proxy);
         // Створюємо тимчасовий тестовий профіль
         const testProfileName = `_test_proxy_${Date.now()}`;
-
         // Зберігаємо проксі в тестовий профіль
         const saveResponse = await fetch(`/api/profiles/${testProfileName}/proxy`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ proxy: proxyString })
         });
-
         // Тестуємо
         const testResponse = await fetch(`/api/profiles/${testProfileName}/proxy/test`, {
             method: 'POST'
         });
-
         const data = await testResponse.json();
-
         if (data.success) {
             proxy.status = 'active';
             proxy.testResult = data;
@@ -168,14 +213,18 @@ async function testProxy(id) {
         } else {
             proxy.status = 'failed';
             proxy.testResult = { error: data.error };
-            showNotification('Proxy test failed', 'error');
+            // Додаємо підказку для 407
+            if (data.error && data.error.includes('407')) {
+                showNotification('Proxy test failed: 407 Proxy Authentication Required. Перевірте логін/пароль!', 'error');
+            } else {
+                showNotification('Proxy test failed', 'error');
+            }
         }
     } catch (error) {
         proxy.status = 'failed';
         proxy.testResult = { error: error.message };
         showNotification('Proxy test error', 'error');
     }
-
     saveProxies();
     renderProxies();
     updateStats();
@@ -331,6 +380,22 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-// Завантажити при старті
-loadProxies();
+// On load, fetch proxies from backend (Electron) or localStorage (web)
+document.addEventListener('DOMContentLoaded', async () => {
+    proxies = await fetchProxies();
+    // Якщо це Electron і proxies не масив, або undefined/null, то явно зробити []
+    if (!Array.isArray(proxies)) proxies = [];
+    renderProxies();
+    document.getElementById('add-proxy-btn').onclick = () => {
+        document.getElementById('new-proxy-modal').style.display = 'block';
+    };
 
+    // Якщо працюємо в Electron, оновлюємо список після додавання/видалення через IPC
+    if (window.ipcRenderer && window.ipcRenderer.on) {
+        window.ipcRenderer.on('proxies-updated', async () => {
+            proxies = await fetchProxies();
+            if (!Array.isArray(proxies)) proxies = [];
+            renderProxies();
+        });
+    }
+});
