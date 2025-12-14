@@ -322,8 +322,13 @@
         }
 
         function openProxyManager() {
-            // TODO: open proxy manager
-            alert('Proxy Manager - coming soon');
+            // If running in Electron, request main process to open the Proxy Manager window
+            if (window.ipcRenderer && window.ipcRenderer.invoke) {
+                window.ipcRenderer.invoke('open-proxy-manager');
+                return;
+            }
+            // Fallback for web
+            window.location.href = '/proxy-manager.html';
         }
 
         function refreshProfiles() {

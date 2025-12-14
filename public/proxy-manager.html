@@ -139,6 +139,29 @@
         </div>
     </div>
 
+    <!-- Modal для редагування проксі -->
+    <div id="edit-proxy-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Edit Proxy</h2>
+            <form id="edit-proxy-form">
+                <input type="text" id="edit-proxy-host" placeholder="Host" required />
+                <input type="text" id="edit-proxy-port" placeholder="Port" required />
+                <input type="text" id="edit-proxy-username" placeholder="Username (optional)" />
+                <input type="password" id="edit-proxy-password" placeholder="Password (optional)" />
+                <select id="edit-proxy-type">
+                    <option value="http">HTTP</option>
+                    <option value="https">HTTPS</option>
+                    <option value="socks5">SOCKS5</option>
+                </select>
+                <div style="margin-top:12px; display:flex; gap:8px;">
+                    <button type="submit" class="btn btn-success">Save</button>
+                    <button type="button" class="btn" onclick="document.getElementById('edit-proxy-modal').style.display='none'">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Modal для імпорту -->
     <div id="import-modal" class="modal">
         <div class="modal-content modal-large">
@@ -156,4 +179,3 @@
     <script src="proxy-manager.js"></script>
 </body>
 </html>
-

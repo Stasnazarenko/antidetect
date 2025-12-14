@@ -7,33 +7,60 @@ let currentProxy = null;
 const { ipcRenderer } = window;
 
 async function fetchProxies() {
-    if (ipcRenderer && ipcRenderer.invoke) {
-        return await ipcRenderer.invoke('get-proxies');
+    // If in Electron, use IPC
+    if (window.ipcRenderer && window.ipcRenderer.invoke) {
+        return await window.ipcRenderer.invoke('get-proxies');
     }
-    // fallback for web: localStorage
-    const stored = localStorage.getItem('proxies');
-    return stored ? JSON.parse(stored) : [];
+    // Web: call server API
+    try {
+        const resp = await fetch('/api/proxies');
+        const json = await resp.json();
+        if (json && json.success) return json.proxies || [];
+        return [];
+    } catch (e) {
+        console.error('Failed to fetch proxies via API', e);
+        return [];
+    }
 }
+
 async function saveProxy(proxy) {
-    if (ipcRenderer && ipcRenderer.invoke) {
-        await ipcRenderer.invoke('add-proxy', proxy);
-        if (ipcRenderer.send) ipcRenderer.send('proxies-updated');
+    if (window.ipcRenderer && window.ipcRenderer.invoke) {
+        await window.ipcRenderer.invoke('add-proxy', proxy);
+        if (window.ipcRenderer.send) window.ipcRenderer.send('proxies-updated');
         return;
     }
-    // fallback for web
-    let proxies = await fetchProxies();
-    proxies.push(proxy);
-    localStorage.setItem('proxies', JSON.stringify(proxies));
+
+    // Web: POST to /api/proxies
+    try {
+        const resp = await fetch('/api/proxies', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(proxy)
+        });
+        const json = await resp.json();
+        if (!json.success) throw new Error(json.error || 'Failed to save proxy');
+    } catch (e) {
+        console.error('Failed to save proxy via API', e);
+        throw e;
+    }
 }
+
 async function removeProxy(id) {
-    if (ipcRenderer && ipcRenderer.invoke) {
-        await ipcRenderer.invoke('delete-proxy', id);
-        if (ipcRenderer.send) ipcRenderer.send('proxies-updated');
+    if (window.ipcRenderer && window.ipcRenderer.invoke) {
+        await window.ipcRenderer.invoke('delete-proxy', id);
+        if (window.ipcRenderer.send) window.ipcRenderer.send('proxies-updated');
         return;
     }
-    let proxies = await fetchProxies();
-    proxies = proxies.filter(p => p.id !== id);
-    localStorage.setItem('proxies', JSON.stringify(proxies));
+
+    // Web: DELETE /api/proxies/:id
+    try {
+        const resp = await fetch(`/api/proxies/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        const json = await resp.json();
+        if (!json.success) throw new Error(json.error || 'Failed to delete proxy');
+    } catch (e) {
+        console.error('Failed to delete proxy via API', e);
+        throw e;
+    }
 }
 
 // Завантажити проксі з localStorage
@@ -70,10 +97,11 @@ function renderProxies() {
     const tagFilter = document.getElementById('filter-tag').value.toLowerCase();
 
     let filtered = proxies.filter(proxy => {
-        if (searchTerm && !proxy.host.toLowerCase().includes(searchTerm)) return false;
-        if (statusFilter !== 'all' && proxy.status !== statusFilter) return false;
-        if (typeFilter !== 'all' && proxy.type !== typeFilter) return false;
-        if (tagFilter && !proxy.tags.some(t => t.toLowerCase().includes(tagFilter))) return false;
+        const tags = proxy.tags || [];
+        if (searchTerm && !(proxy.host || '').toLowerCase().includes(searchTerm)) return false;
+        if (statusFilter !== 'all' && (proxy.status || 'inactive') !== statusFilter) return false;
+        if (typeFilter !== 'all' && (proxy.type || 'http') !== typeFilter) return false;
+        if (tagFilter && !tags.some(t => t.toLowerCase().includes(tagFilter))) return false;
         return true;
     });
 
@@ -102,14 +130,14 @@ function renderProxies() {
             <div class="proxy-card" data-id="${proxy.id}">
                 <div class="proxy-header">
                     <div>
-                        <strong>${proxy.host}:${proxy.port}</strong>
-                        <span style="color: #718096; margin-left: 10px;">${proxy.type.toUpperCase()}</span>
+                        <strong>${proxy.host || ''}:${proxy.port || ''}</strong>
+                        <span style="color: #718096; margin-left: 10px;">${(proxy.type || 'http').toUpperCase()}</span>
                     </div>
                     <div class="proxy-status ${statusClass}">${statusText}</div>
                 </div>
                 
                 <div class="proxy-tags">
-                    ${proxy.tags.map(tag => `
+                    ${(proxy.tags || []).map(tag => `
                         <span class="tag">
                             ${tag}
                             <span class="remove" onclick="removeTag('${proxy.id}', '${tag}')">×</span>
@@ -121,9 +149,10 @@ function renderProxies() {
                 
                 ${proxy.testResult ? `
                     <div class="proxy-info">
-                        <div><strong>IP:</strong> ${proxy.testResult.ip}</div>
-                        <div><strong>Location:</strong> ${proxy.testResult.location.city}, ${proxy.testResult.location.country}</div>
-                        <div><strong>Response:</strong> ${proxy.testResult.responseTime}</div>
+                        ${proxy.testResult.ip ? `<div><strong>IP:</strong> ${proxy.testResult.ip}</div>` : ''}
+                        ${proxy.testResult.location ? `<div><strong>Location:</strong> ${(proxy.testResult.location.city||'')}${(proxy.testResult.location.city && proxy.testResult.location.country) ? ', ' : ''}${(proxy.testResult.location.country||'')}</div>` : ''}
+                        ${proxy.testResult.responseTime ? `<div><strong>Response:</strong> ${proxy.testResult.responseTime}</div>` : ''}
+                        ${proxy.testResult.error ? `<div><strong>Error:</strong> ${proxy.testResult.error}</div>` : ''}
                     </div>
                 ` : ''}
                 
@@ -172,15 +201,28 @@ document.getElementById('new-proxy-form').addEventListener('submit', async (e) =
         createdAt: new Date().toISOString()
     };
 
-    proxies.push(proxy);
-    saveProxies();
-    renderProxies();
-    updateStats();
+    try {
+        // Save via server API (or via IPC in Electron)
+        await saveProxy(proxy);
 
-    document.getElementById('new-proxy-modal').style.display = 'none';
-    document.getElementById('new-proxy-form').reset();
+        // Refresh list from server (or from IPC)
+        let fetched = await fetchProxies();
+        if (fetched && fetched.proxies && Array.isArray(fetched.proxies)) proxies = fetched.proxies;
+        else if (Array.isArray(fetched)) proxies = fetched;
+        else if (fetched && fetched.data && Array.isArray(fetched.data.proxies)) proxies = fetched.data.proxies;
+        else proxies = proxies || [];
 
-    showNotification('Proxy added successfully', 'success');
+        renderProxies();
+        updateStats();
+
+        document.getElementById('new-proxy-modal').style.display = 'none';
+        document.getElementById('new-proxy-form').reset();
+
+        showNotification('Proxy added successfully', 'success');
+    } catch (err) {
+        console.error('Failed to save proxy', err);
+        showNotification('Failed to save proxy: ' + (err && err.message ? err.message : 'unknown'), 'error');
+    }
 });
 
 // Тестувати проксі
@@ -225,7 +267,26 @@ async function testProxy(id) {
         proxy.testResult = { error: error.message };
         showNotification('Proxy test error', 'error');
     }
-    saveProxies();
+    // Persist status/testResult: if in Electron use IPC update, else PUT to /api/proxies/:id
+    try {
+        if (window.ipcRenderer && window.ipcRenderer.invoke) {
+            await window.ipcRenderer.invoke('update-proxy', proxy);
+            window.ipcRenderer.send && window.ipcRenderer.send('proxies-updated');
+        } else if (proxy.id) {
+            await fetch(`/api/proxies/${encodeURIComponent(proxy.id)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(proxy)
+            });
+        } else {
+            // fallback: save locally
+            saveProxies();
+        }
+    } catch (e) {
+        console.error('Failed to persist proxy test result', e);
+        // fallback to local save
+        saveProxies();
+    }
     renderProxies();
     updateStats();
 }
@@ -265,9 +326,22 @@ function addTag(proxyId) {
     if (!tag) return;
 
     const proxy = proxies.find(p => p.id === proxyId);
-    if (proxy && !proxy.tags.includes(tag)) {
+    if (!proxy) return;
+    proxy.tags = Array.isArray(proxy.tags) ? proxy.tags : [];
+
+    if (!proxy.tags.includes(tag)) {
         proxy.tags.push(tag);
-        saveProxies();
+        // persist change
+        if (window.ipcRenderer && window.ipcRenderer.invoke) {
+            window.ipcRenderer.invoke('update-proxy', proxy);
+            window.ipcRenderer.send && window.ipcRenderer.send('proxies-updated');
+        } else if (proxy.id) {
+            fetch(`/api/proxies/${encodeURIComponent(proxy.id)}`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proxy)
+            }).catch(e => console.error('Failed to persist tag', e));
+        } else {
+            saveProxies();
+        }
         renderProxies();
     }
 }
@@ -275,32 +349,109 @@ function addTag(proxyId) {
 // Видалити тег
 function removeTag(proxyId, tag) {
     const proxy = proxies.find(p => p.id === proxyId);
-    if (proxy) {
-        proxy.tags = proxy.tags.filter(t => t !== tag);
+    if (!proxy) return;
+    proxy.tags = Array.isArray(proxy.tags) ? proxy.tags : [];
+    proxy.tags = proxy.tags.filter(t => t !== tag);
+
+    // persist change
+    if (window.ipcRenderer && window.ipcRenderer.invoke) {
+        window.ipcRenderer.invoke('update-proxy', proxy);
+        window.ipcRenderer.send && window.ipcRenderer.send('proxies-updated');
+    } else if (proxy.id) {
+        fetch(`/api/proxies/${encodeURIComponent(proxy.id)}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proxy)
+        }).catch(e => console.error('Failed to persist tag removal', e));
+    } else {
         saveProxies();
-        renderProxies();
     }
+
+    renderProxies();
 }
 
 // Видалити проксі
-function deleteProxy(id) {
+async function deleteProxy(id) {
     if (!confirm('Delete this proxy?')) return;
 
-    proxies = proxies.filter(p => p.id !== id);
-    saveProxies();
-    renderProxies();
-    updateStats();
-    showNotification('Proxy deleted', 'success');
+    try {
+        await removeProxy(id);
+        proxies = proxies.filter(p => p.id !== id);
+        renderProxies();
+        updateStats();
+        showNotification('Proxy deleted', 'success');
+    } catch (e) {
+        showNotification('Failed to delete proxy', 'error');
+    }
+}
+
+// Редагувати проксі
+function editProxy(id) {
+    const proxy = proxies.find(p => p.id === id);
+    if (!proxy) return;
+
+    document.getElementById('edit-proxy-host').value = proxy.host || '';
+    document.getElementById('edit-proxy-port').value = proxy.port || '';
+    document.getElementById('edit-proxy-username').value = proxy.username || '';
+    document.getElementById('edit-proxy-password').value = proxy.password || '';
+    document.getElementById('edit-proxy-type').value = proxy.type || 'http';
+    document.getElementById('edit-proxy-modal').style.display = 'block';
+
+    const form = document.getElementById('edit-proxy-form');
+    const handler = async (e) => {
+        e.preventDefault();
+        const updated = {
+            host: document.getElementById('edit-proxy-host').value,
+            port: document.getElementById('edit-proxy-port').value,
+            username: document.getElementById('edit-proxy-username').value,
+            password: document.getElementById('edit-proxy-password').value,
+            type: document.getElementById('edit-proxy-type').value
+        };
+
+        try {
+            // If Electron IPC available, use update via main process
+            if (window.ipcRenderer && window.ipcRenderer.invoke) {
+                // update local store
+                const idx = proxies.findIndex(p => p.id === id);
+                if (idx !== -1) proxies[idx] = Object.assign({}, proxies[idx], updated);
+                // save via ipc
+                await window.ipcRenderer.invoke('update-proxy', proxies[idx]);
+                window.ipcRenderer.send && window.ipcRenderer.send('proxies-updated');
+            } else {
+                // Web: call PUT /api/proxies/:id
+                const resp = await fetch(`/api/proxies/${encodeURIComponent(id)}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Object.assign({}, proxies.find(p => p.id === id) || {}, updated))
+                });
+                const json = await resp.json();
+                if (!json.success) throw new Error(json.error || 'Failed to update proxy');
+                // update local array
+                const idx = proxies.findIndex(p => p.id === id);
+                if (idx !== -1) proxies[idx] = Object.assign({}, proxies[idx], updated);
+            }
+
+            renderProxies();
+            updateStats();
+            showNotification('Proxy updated', 'success');
+            document.getElementById('edit-proxy-modal').style.display = 'none';
+            form.removeEventListener('submit', handler);
+        } catch (err) {
+            showNotification('Failed to update proxy', 'error');
+            console.error('editProxy error:', err);
+        }
+    };
+
+    form.removeEventListener('submit', handler);
+    form.addEventListener('submit', handler);
 }
 
 // Імпорт проксі
-document.getElementById('import-submit-btn').addEventListener('click', () => {
+document.getElementById('import-submit-btn').addEventListener('click', async () => {
     const textarea = document.getElementById('import-textarea');
     const lines = textarea.value.split('\n').filter(l => l.trim());
 
     let imported = 0;
 
-    lines.forEach(line => {
+    for (const line of lines) {
         const parts = line.trim().split(':');
         if (parts.length >= 2) {
             const proxy = {
@@ -315,10 +466,29 @@ document.getElementById('import-submit-btn').addEventListener('click', () => {
                 testResult: null,
                 createdAt: new Date().toISOString()
             };
-            proxies.push(proxy);
-            imported++;
+
+            // save each via API (web) or IPC (electron)
+            try {
+                if (window.ipcRenderer && window.ipcRenderer.invoke) {
+                    await window.ipcRenderer.invoke('add-proxy', proxy);
+                    window.ipcRenderer.send && window.ipcRenderer.send('proxies-updated');
+                } else {
+                    await fetch('/api/proxies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proxy) });
+                }
+                imported++;
+            } catch (e) {
+                console.error('Failed to import proxy', e);
+            }
         }
-    });
+    }
+
+    // Refresh from server
+    try {
+        const fetched = await fetchProxies();
+        proxies = Array.isArray(fetched) ? fetched : (fetched && fetched.proxies) ? fetched.proxies : [];
+    } catch (e) {
+        // fallback keep local
+    }
 
     saveProxies();
     renderProxies();
@@ -382,20 +552,59 @@ function showNotification(message, type = 'info') {
 
 // On load, fetch proxies from backend (Electron) or localStorage (web)
 document.addEventListener('DOMContentLoaded', async () => {
-    proxies = await fetchProxies();
+    try {
+        let fetched = await fetchProxies();
+        // If Electron IPC returned object (from main.cjs getProxies), normalize
+        if (fetched && fetched.proxies && Array.isArray(fetched.proxies)) {
+            proxies = fetched.proxies;
+        } else if (Array.isArray(fetched)) {
+            proxies = fetched;
+        } else if (fetched && fetched.data && Array.isArray(fetched.data.proxies)) {
+            // sometimes ipc returns { success: true, data: { proxies: [...] } }
+            proxies = fetched.data.proxies;
+        } else {
+            proxies = [];
+        }
+    } catch (e) {
+        proxies = [];
+    }
+
     // Якщо це Electron і proxies не масив, або undefined/null, то явно зробити []
     if (!Array.isArray(proxies)) proxies = [];
     renderProxies();
-    document.getElementById('add-proxy-btn').onclick = () => {
-        document.getElementById('new-proxy-modal').style.display = 'block';
-    };
+    updateStats();
+    const newProxyBtn = document.getElementById('new-proxy-btn');
+    if (newProxyBtn) {
+        newProxyBtn.onclick = () => {
+            const modal = document.getElementById('new-proxy-modal');
+            if (modal) modal.style.display = 'block';
+        };
+    }
 
-    // Якщо працюємо в Electron, оновлюємо список після додавання/видалення через IPC
+    // Web: listen to server socket updates if available
+    if (!window.ipcRenderer && typeof io !== 'undefined') {
+        try {
+            const socket = io();
+            socket.on('proxies_updated', async () => {
+                proxies = await fetchProxies();
+                if (!Array.isArray(proxies)) proxies = [];
+                renderProxies();
+                updateStats();
+            });
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    // If using IPC in Electron, update list after changes
     if (window.ipcRenderer && window.ipcRenderer.on) {
         window.ipcRenderer.on('proxies-updated', async () => {
-            proxies = await fetchProxies();
-            if (!Array.isArray(proxies)) proxies = [];
+            const fetched2 = await fetchProxies();
+            if (fetched2 && fetched2.proxies && Array.isArray(fetched2.proxies)) proxies = fetched2.proxies;
+            else if (Array.isArray(fetched2)) proxies = fetched2;
+            else proxies = [];
             renderProxies();
+            updateStats();
         });
     }
 });

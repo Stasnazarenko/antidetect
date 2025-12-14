@@ -98,13 +98,92 @@ function createWindow() {
 // Proxy storage file
 const proxyStorePath = path.join(__dirname, 'storage', 'proxies.json');
 
-function getProxies() {
-    if (!fs.existsSync(proxyStorePath)) return [];
-    try {
-        return JSON.parse(fs.readFileSync(proxyStorePath, 'utf-8'));
-    } catch (e) {
-        return [];
+function parseServerString(server) {
+    if (!server) return { host: '', port: '', username: '', password: '', type: 'http' };
+    // remove scheme
+    server = String(server).replace(/^(https?:\/\/|socks5?:\/\/|socks4?:\/\/)*/i, '');
+    // if contains auth user:pass@host:port
+    if (server.includes('@')) {
+        const [auth, hostPart] = server.split('@');
+        const [user, pass] = auth.split(':');
+        const [host, port] = hostPart.split(':');
+        return { host: host || '', port: port || '', username: user || '', password: pass || '', type: 'http' };
     }
+    const parts = server.split(':');
+    if (parts.length >= 2) {
+        return { host: parts[0], port: parts[1], username: parts[2] || '', password: parts[3] || '', type: 'http' };
+    }
+    return { host: server, port: '', username: '', password: '', type: 'http' };
+}
+
+function getProxies() {
+    let results = [];
+    // load global proxy store
+    if (fs.existsSync(proxyStorePath)) {
+        try {
+            const list = JSON.parse(fs.readFileSync(proxyStorePath, 'utf-8')) || [];
+            if (Array.isArray(list)) {
+                for (const p of list) {
+                    const obj = Object.assign({}, p);
+                    // normalize: if has server field, split
+                    if (obj.server && typeof obj.server === 'string') {
+                        const parsed = parseServerString(obj.server);
+                        obj.host = obj.host || parsed.host;
+                        obj.port = obj.port || parsed.port;
+                        obj.username = obj.username || parsed.username;
+                        obj.password = obj.password || parsed.password;
+                        obj.type = obj.type || parsed.type;
+                    }
+                    // ensure id
+                    obj.id = obj.id || ('proxy_' + (obj.server || obj.host || Math.random()).toString().replace(/[^a-z0-9]/gi, '_'));
+                    obj.tags = obj.tags || [];
+                    obj.status = obj.status || 'inactive';
+                    results.push(obj);
+                }
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    // merge profile-level proxies from storage/profiles.json
+    const profilesPath = path.join(__dirname, 'storage', 'profiles.json');
+    if (fs.existsSync(profilesPath)) {
+        try {
+            const pdata = JSON.parse(fs.readFileSync(profilesPath, 'utf-8'));
+            const profiles = pdata.profiles || [];
+            for (const p of profiles) {
+                if (!p) continue;
+                const proxy = p.proxy;
+                if (!proxy) continue;
+                // normalize proxy which can be object or string
+                let norm = null;
+                if (typeof proxy === 'object') {
+                    norm = Object.assign({}, proxy);
+                } else if (typeof proxy === 'string') {
+                    norm = parseServerString(proxy);
+                }
+                if (!norm) continue;
+                const parsed = parseServerString(norm.server || (norm.host && norm.port ? `${norm.host}:${norm.port}` : ''));
+                const obj = {
+                    id: 'profile_' + (p.name || Math.random()).toString().replace(/[^a-z0-9]/gi, '_'),
+                    host: parsed.host,
+                    port: parsed.port,
+                    username: norm.username || parsed.username || '',
+                    password: norm.password || parsed.password || '',
+                    type: norm.type || parsed.type || 'http',
+                    tags: ['profile:' + (p.name || '')],
+                    status: 'inactive',
+                    profileName: p.name
+                };
+                results.push(obj);
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    return results;
 }
 function saveProxies(proxies) {
     fs.writeFileSync(proxyStorePath, JSON.stringify(proxies, null, 2));

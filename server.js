@@ -6,6 +6,7 @@ import bodyParser from 'body-parser';
 import * as db from './scr/db.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -134,11 +135,23 @@ app.post('/api/profiles/:name/proxy', async (req, res) => {
     try {
         const { name } = req.params;
         const { proxy } = req.body;
+
+        console.log(`[API] set proxy for profile ${name} ->`, proxy);
+
+        // Якщо профілю немає в базі, створимо автоматично (це важливо для тимчасових _test_proxy_* профілів)
+        const exists = await db.check_Profile(name);
+        if (!exists) {
+            console.log(`[API] Profile ${name} not found in DB - creating automatically`);
+            await manage.create_Profile(name);
+        }
+
         await manage.set_ProfileProxy(name, proxy);
         io.emit('profile_updated', { name, field: 'proxy' });
         res.json({ success: true });
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        console.error(`[API] Error setting proxy for profile ${req.params.name}:`, error && error.message ? error.message : error);
+        // Повертаємо більше деталей для UI (без енв-даних)
+        res.status(500).json({ success: false, error: String(error.message || error), stack: (error.stack || '').split('\n').slice(0,5) });
     }
 });
 
@@ -179,57 +192,90 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import axios from 'axios';
 
-async function testProxy(proxyString) {
+async function testProxy(proxyStringOrObj) {
     try {
-        // Очікуємо: host:port:username:password:type
-        let [host, port, username, password, type] = proxyString.split(':');
-        if (!type) type = 'http';
-        // Якщо host містить ip:port:username:password:тип, але host вже містить порт, username, password, type буде undefined
-        // Якщо host містить схему, видалити її
-        if (host) {
-            host = host.trim();
-            // Якщо host містить схему (http://, https://, socks5://), видалити
-            host = host.replace(/^(http|https|socks5):\/\//i, '');
-            // Якщо host містить ще раз схему (http:, socks5:), видалити всі повтори
-            while (/^(http|https|socks5):/i.test(host)) {
-                host = host.replace(/^(http|https|socks5):/i, '');
+        // Normalize proxy input to object with server, username, password, type
+        let proxyObj = null;
+
+        if (!proxyStringOrObj) throw new Error('Empty proxy');
+
+        if (typeof proxyStringOrObj === 'object') {
+            proxyObj = Object.assign({}, proxyStringOrObj);
+        } else if (typeof proxyStringOrObj === 'string') {
+            let s = proxyStringOrObj.trim();
+            // remove surrounding quotes if any
+            if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+                s = s.slice(1, -1);
             }
-            // Якщо host містить схему всередині (http://http://...), видалити всі повтори
-            host = host.replace(/(http|https|socks5):\/\//gi, '');
-            host = host.replace(/(http|https|socks5):/gi, '');
-            host = host.replace(/^\s+|\s+$/g, '');
+
+            // if looks like URL with scheme
+            try {
+                const parsed = new URL(s.startsWith('http') || s.startsWith('socks') ? s : `http://${s}`);
+                const host = parsed.hostname;
+                const port = parsed.port;
+                const user = parsed.username || '';
+                const pass = parsed.password || '';
+                const scheme = parsed.protocol ? parsed.protocol.replace(':', '') : 'http';
+                if (host && port) {
+                    proxyObj = { server: `${host}:${port}`, username: user || undefined, password: pass || undefined, type: scheme || 'http' };
+                }
+            } catch (e) {
+                // fallback parsing: user:pass@host:port or host:port:username:password:type or host:port
+                // Try user:pass@host:port
+                if (s.includes('@')) {
+                    const [authPart, hostPart] = s.split('@');
+                    const [user, pass] = authPart.split(':');
+                    const hostClean = hostPart.replace(/^(https?:\/\/|socks5?:\/\/|socks4?:\/\/)*/i, '');
+                    const hostParts = hostClean.split(':');
+                    const host = hostParts[0];
+                    const port = hostParts[1] || '';
+                    if (host && port) proxyObj = { server: `${host}:${port}`, username: user || undefined, password: pass || undefined, type: 'http' };
+                }
+                if (!proxyObj) {
+                    const parts = s.split(':');
+                    if (parts.length >= 2) {
+                        // host:port[:username[:password[:type]]]
+                        const host = parts[0];
+                        const port = parts[1];
+                        const username = parts[2] || undefined;
+                        const password = parts[3] || undefined;
+                        const type = parts[4] || 'http';
+                        proxyObj = { server: `${host}:${port}`, username, password, type };
+                    }
+                }
+            }
+        } else {
+            throw new Error('Unsupported proxy format');
         }
-        // Якщо порт не число, можливо host містить порт (наприклад, host = '89.33.245.223:5613')
-        if (port && isNaN(Number(port))) {
-            // Спробувати розпарсити host ще раз
-            const hostParts = host.split(':');
-            host = hostParts[0];
-            port = hostParts[1] || '';
-            username = hostParts[2] || username;
-            password = hostParts[3] || password;
+
+        if (!proxyObj || !proxyObj.server) {
+            throw new Error('Invalid proxy format');
         }
-        let agent;
+
+        // Build proxy URL for agent
+        const server = String(proxyObj.server).replace(/^(https?:\/\/|socks5?:\/\/|socks4?:\/\/)*/i, '');
+        const [hostOnly, portOnly] = server.split(':');
+        const type = (proxyObj.type || 'http').toLowerCase();
+        const username = proxyObj.username || proxyObj.user || '';
+        const password = proxyObj.password || proxyObj.pass || '';
+
         let proxyUrl;
-        if (type === 'socks5') {
-            proxyUrl = username && password
-                ? `socks5://${username}:${password}@${host}:${port}`
-                : `socks5://${host}:${port}`;
+        let agent;
+        if (type.startsWith('socks')) {
+            proxyUrl = username && password ? `socks5://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${hostOnly}:${portOnly}` : `socks5://${hostOnly}:${portOnly}`;
             agent = new SocksProxyAgent(proxyUrl);
         } else {
-            proxyUrl = username && password
-                ? `http://${username}:${password}@${host}:${port}`
-                : `http://${host}:${port}`;
+            proxyUrl = username && password ? `http://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${hostOnly}:${portOnly}` : `http://${hostOnly}:${portOnly}`;
             agent = new HttpsProxyAgent(proxyUrl);
         }
+
         const startTime = Date.now();
-        // Тестуємо з'єднання
         const response = await axios.get('https://api.ipify.org?format=json', {
             httpsAgent: agent,
             httpAgent: agent,
             timeout: 10000
         });
         const responseTime = Date.now() - startTime;
-        // Отримуємо геолокацію IP
         const geoResponse = await axios.get(`http://ip-api.com/json/${response.data.ip}`);
         return {
             success: true,
@@ -245,7 +291,7 @@ async function testProxy(proxyString) {
     } catch (error) {
         return {
             success: false,
-            error: error.message,
+            error: error && error.message ? error.message : String(error),
             status: 'failed'
         };
     }
@@ -303,6 +349,92 @@ app.post('/api/cleanup', async (req, res) => {
         res.json({ success: true, cleaned: result.cleaned || 0 });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Глобальний список проксі
+const proxiesPath = path.join(__dirname, 'storage', 'proxies.json');
+
+function readProxiesFile() {
+    if (!fs.existsSync(proxiesPath)) return [];
+    try {
+        return JSON.parse(fs.readFileSync(proxiesPath, 'utf8')) || [];
+    } catch (e) {
+        return [];
+    }
+}
+function writeProxiesFile(list) {
+    fs.writeFileSync(proxiesPath, JSON.stringify(list, null, 2));
+}
+
+// GET all proxies (global)
+app.get('/api/proxies', async (req, res) => {
+    try {
+        const list = readProxiesFile();
+        res.json({ success: true, proxies: list });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// POST add global proxy
+app.post('/api/proxies', async (req, res) => {
+    try {
+        const proxy = req.body;
+        if (!proxy) return res.status(400).json({ success: false, error: 'Proxy required' });
+        // normalize defaults
+        if (!proxy.tags || !Array.isArray(proxy.tags)) proxy.tags = proxy.tags ? [proxy.tags] : [];
+        if (!proxy.status) proxy.status = 'inactive';
+        if (typeof proxy.testResult === 'undefined') proxy.testResult = null;
+        if (!proxy.createdAt) proxy.createdAt = new Date().toISOString();
+        const list = readProxiesFile();
+        // ensure id
+        if (!proxy.id) proxy.id = Date.now().toString() + '_' + Math.random().toString(36).slice(2,8);
+        list.push(proxy);
+        writeProxiesFile(list);
+        io.emit('proxies_updated');
+        res.json({ success: true, proxy });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// PUT update proxy by id
+app.put('/api/proxies/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const newProxy = req.body;
+        if (!newProxy) return res.status(400).json({ success: false, error: 'Proxy body required' });
+        let list = readProxiesFile();
+        let found = false;
+        list = list.map(p => {
+            if (p.id === id) {
+                found = true;
+                return Object.assign({}, p, newProxy, { id });
+            }
+            return p;
+        });
+        if (!found) return res.status(404).json({ success: false, error: 'Proxy not found' });
+        writeProxiesFile(list);
+        io.emit('proxies_updated');
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// DELETE proxy by id
+app.delete('/api/proxies/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        let list = readProxiesFile();
+        const before = list.length;
+        list = list.filter(p => p.id !== id);
+        writeProxiesFile(list);
+        io.emit('proxies_updated');
+        res.json({ success: true, deleted: before - list.length });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
