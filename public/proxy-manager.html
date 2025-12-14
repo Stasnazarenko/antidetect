@@ -162,6 +162,20 @@
         </div>
     </div>
 
+    <!-- Modal для призначення проксі профілю -->
+    <div id="assign-proxy-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Assign Proxy to Profile</h2>
+            <div style="margin:8px 0 12px 0;color:#718096;">Select an existing profile to assign this proxy to (creates no new profiles).</div>
+            <select id="assign-profile-select" style="width:100%; padding:8px; border-radius:6px; border:1px solid #e2e8f0;"></select>
+            <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+                <button id="assign-profile-save" class="btn btn-success">Assign</button>
+                <button id="assign-profile-cancel" class="btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal для імпорту -->
     <div id="import-modal" class="modal">
         <div class="modal-content modal-large">

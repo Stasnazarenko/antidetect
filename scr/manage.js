@@ -506,4 +506,78 @@ async function rename_Profile(name, newName) {
     return newName;
 }
 
-export { create_Profile, open_Profile, close_Profile, active, set_ProfileProxy };
+// Launch an ephemeral profile (not saved in DB) with optional fingerprint and proxy
+async function launch_Ephemeral(options = {}) {
+    console.log(timeLog() + `Launching ephemeral profile...`);
+
+    const bridge = await ensureBridge();
+
+    // Build fingerprint: if provided use it, otherwise generate
+    let fingerprintData = options.fingerprintData || null;
+    if (!fingerprintData) {
+        try {
+            const fpString = await get_Fingerprint();
+            fingerprintData = JSON.parse(fpString);
+        } catch (e) {
+            fingerprintData = false;
+        }
+    }
+
+    // Normalize proxy object if provided
+    let proxy = options.proxy || null;
+    if (proxy && typeof proxy === 'object' && proxy.host && proxy.port) {
+        proxy = { server: `${proxy.host}:${proxy.port}`, username: proxy.username || proxy.user || proxy.login, password: proxy.password || proxy.pass, type: proxy.type || 'http' };
+    }
+
+    const ephemeralName = `_ephemeral_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+
+    const command = {
+        action: 'launch',
+        profile: ephemeralName,
+        config: {
+            fingerprint: fingerprintData || false
+        }
+    };
+
+    if (proxy) {
+        command.config.proxy = proxy;
+        command.config.proxyType = proxy.type || 'http';
+    }
+
+    // If proxy is set, test it locally first
+    if (command.config && command.config.proxy) {
+        try {
+            await testProxyLocal(command.config.proxy);
+            console.log(timeLog() + ` Ephemeral proxy passed local test`);
+        } catch (err) {
+            console.error(timeLog() + ` Ephemeral proxy test failed: ${err.message}`);
+            throw err;
+        }
+    }
+
+    // Send command to bridge
+    bridge.stdin.write(JSON.stringify(command) + '\n');
+
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('Ephemeral launch timeout'));
+        }, 30000);
+
+        bridge.stdout.once('data', (data) => {
+            clearTimeout(timeout);
+            try {
+                const response = JSON.parse(data.toString());
+                if (response.success) {
+                    // Do NOT persist anything in DB for ephemeral
+                    resolve({ success: true, name: ephemeralName, bridge: response });
+                } else {
+                    reject(new Error(response.error || 'Ephemeral launch failed'));
+                }
+            } catch (e) {
+                reject(new Error('Invalid response: ' + data.toString()));
+            }
+        });
+    });
+}
+
+export { create_Profile, open_Profile, close_Profile, active, set_ProfileProxy, launch_Ephemeral };

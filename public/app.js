@@ -129,6 +129,12 @@ function renderProfiles() {
                     <span class="info-label">Proxy:</span>
                     <span class="info-value">${profile.proxy ? '✅ Configured' : '❌ None'}</span>
                 </div>
+                ${profile.proxy && typeof profile.proxy === 'object' ? `
+                <div class="info-row">
+                    <span class="info-label">Assigned proxy:</span>
+                    <span class="info-value">${profile.proxy.id || profile.proxy.server || profile.proxy}</span>
+                </div>
+                ` : ''}
                 <div class="info-row">
                     <span class="info-label">OS:</span>
                     <span class="info-value">${fpPreview.os}</span>

@@ -2,6 +2,7 @@ const socket = io();
 
 let proxies = [];
 let currentProxy = null;
+let pendingAssignProxyId = null;
 
 // IPC API for Electron
 const { ipcRenderer } = window;
@@ -146,7 +147,13 @@ function renderProxies() {
                     <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;" 
                             onclick="addTag('${proxy.id}')">+ Tag</button>
                 </div>
-                
+
+                ${proxy.assignedTo && proxy.assignedTo.length ? `
+                    <div class="proxy-assigned" style="margin-bottom:8px;color:#4a5568;font-size:13px;">
+                        Assigned to: ${proxy.assignedTo.join(', ')}
+                    </div>
+                ` : ''}
+
                 ${proxy.testResult ? `
                     <div class="proxy-info">
                         ${proxy.testResult.ip ? `<div><strong>IP:</strong> ${proxy.testResult.ip}</div>` : ''}
@@ -230,24 +237,15 @@ async function testProxy(id) {
     const proxy = proxies.find(p => p.id === id);
     if (!proxy) return;
 
+    // set testing state
     proxy.status = 'testing';
     renderProxies();
 
     try {
-        const proxyString = formatProxyString(proxy);
-        // Створюємо тимчасовий тестовий профіль
-        const testProfileName = `_test_proxy_${Date.now()}`;
-        // Зберігаємо проксі в тестовий профіль
-        const saveResponse = await fetch(`/api/profiles/${testProfileName}/proxy`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ proxy: proxyString })
-        });
-        // Тестуємо
-        const testResponse = await fetch(`/api/profiles/${testProfileName}/proxy/test`, {
-            method: 'POST'
-        });
-        const data = await testResponse.json();
+        // Call server endpoint to test by id
+        const resp = await fetch(`/api/proxies/${encodeURIComponent(id)}/test`, { method: 'POST' });
+        const data = await resp.json();
+
         if (data.success) {
             proxy.status = 'active';
             proxy.testResult = data;
@@ -255,7 +253,6 @@ async function testProxy(id) {
         } else {
             proxy.status = 'failed';
             proxy.testResult = { error: data.error };
-            // Додаємо підказку для 407
             if (data.error && data.error.includes('407')) {
                 showNotification('Proxy test failed: 407 Proxy Authentication Required. Перевірте логін/пароль!', 'error');
             } else {
@@ -267,58 +264,78 @@ async function testProxy(id) {
         proxy.testResult = { error: error.message };
         showNotification('Proxy test error', 'error');
     }
-    // Persist status/testResult: if in Electron use IPC update, else PUT to /api/proxies/:id
+
+    // refresh list from server to pick up persisted testResult/status
     try {
-        if (window.ipcRenderer && window.ipcRenderer.invoke) {
-            await window.ipcRenderer.invoke('update-proxy', proxy);
-            window.ipcRenderer.send && window.ipcRenderer.send('proxies-updated');
-        } else if (proxy.id) {
-            await fetch(`/api/proxies/${encodeURIComponent(proxy.id)}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(proxy)
-            });
-        } else {
-            // fallback: save locally
-            saveProxies();
-        }
+        proxies = await fetchProxies();
     } catch (e) {
-        console.error('Failed to persist proxy test result', e);
-        // fallback to local save
-        saveProxies();
+        // fallback to local update
+        try {
+            if (proxy.id) {
+                await fetch(`/api/proxies/${encodeURIComponent(proxy.id)}`, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(proxy)
+                });
+            }
+        } catch (e2) {}
     }
+
     renderProxies();
     updateStats();
 }
 
 // Assign проксі до профілю
 async function assignToProfile(proxyId) {
-    const proxy = proxies.find(p => p.id === proxyId);
-    if (!proxy) return;
-
-    const profileName = prompt('Enter profile name:');
-    if (!profileName) return;
-
-    try {
-        const proxyString = `${proxy.host}:${proxy.port}:${proxy.username}:${proxy.password}:${proxy.type}`;
-
-        const response = await fetch(`/api/profiles/${profileName}/proxy`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ proxy: proxyString })
-        });
-
-        const data = await response.json();
-
-        if (data.success) {
-            showNotification(`Proxy assigned to ${profileName}`, 'success');
-        } else {
-            showNotification(data.error || 'Failed to assign proxy', 'error');
-        }
-    } catch (error) {
-        showNotification('Error assigning proxy', 'error');
-    }
+    openAssignModal(proxyId);
 }
+
+async function openAssignModal(proxyId) {
+    pendingAssignProxyId = proxyId;
+    const select = document.getElementById('assign-profile-select');
+    select.innerHTML = '<option value="">Loading...</option>';
+    try {
+        const resp = await fetch('/api/profiles');
+        const data = await resp.json();
+        if (data && data.success) {
+            const options = data.profiles.map(p => `<option value="${p.name}">${p.name}${p.proxyInfo ? ` — ${p.proxyInfo.host}:${p.proxyInfo.port}` : ''}</option>`).join('');
+            select.innerHTML = `<option value="">Select profile...</option>` + options;
+        } else {
+            select.innerHTML = '<option value="">No profiles</option>';
+        }
+    } catch (e) {
+        select.innerHTML = '<option value="">Error loading profiles</option>';
+    }
+    document.getElementById('assign-proxy-modal').style.display = 'block';
+}
+
+document.getElementById('assign-profile-cancel').addEventListener('click', () => {
+    document.getElementById('assign-proxy-modal').style.display = 'none';
+    pendingAssignProxyId = null;
+});
+
+document.getElementById('assign-profile-save').addEventListener('click', async () => {
+    const sel = document.getElementById('assign-profile-select');
+    const profileName = sel.value;
+    if (!profileName || !pendingAssignProxyId) return;
+    try {
+        const resp = await fetch(`/api/profiles/${encodeURIComponent(profileName)}/proxy`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxyId: pendingAssignProxyId })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            // refresh proxies list
+            proxies = await fetchProxies();
+            renderProxies();
+            updateStats();
+            document.getElementById('assign-proxy-modal').style.display = 'none';
+            pendingAssignProxyId = null;
+            showNotification('Proxy assigned', 'success');
+        } else {
+            showNotification(data.error || 'Assign failed', 'error');
+        }
+    } catch (e) {
+        showNotification('Assign failed', 'error');
+    }
+});
 
 // Додати тег
 function addTag(proxyId) {

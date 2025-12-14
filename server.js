@@ -34,6 +34,7 @@ app.get('/api/profiles', async (req, res) => {
     try {
         const profiles = await db.get_Profiles();
         const profilesData = [];
+        const proxiesList = readProxiesFile();
 
         for (const profile of profiles) {
             const pdata = await db.get_Profile(profile);
@@ -45,12 +46,43 @@ app.get('/api/profiles', async (req, res) => {
                     isOpen = false;
                 }
             }
+
+            // Resolve proxy info from global proxies list if possible
+            let rawProxy = pdata.get('proxy') || false;
+            let proxyInfo = null;
+            try {
+                if (rawProxy) {
+                    if (typeof rawProxy === 'object' && rawProxy.id) {
+                        const found = proxiesList.find(p => p.id === rawProxy.id);
+                        if (found) proxyInfo = { id: found.id, host: found.host, port: found.port, tags: found.tags || [] };
+                    } else if (typeof rawProxy === 'object' && rawProxy.server) {
+                        const server = String(rawProxy.server).replace(/^(https?:\/\/|socks5?:\/\/|socks4?:\/\/)*/i, '');
+                        const found = proxiesList.find(p => `${p.host}:${p.port}` === server || p.server === server);
+                        if (found) proxyInfo = { id: found.id, host: found.host, port: found.port, tags: found.tags || [] };
+                    } else if (typeof rawProxy === 'string') {
+                        // normalize string to host:port
+                        let s = rawProxy.trim();
+                        s = s.replace(/^(https?:\/\/|socks5?:\/\/|socks4?:\/\/)*/i, '');
+                        // remove possible username@
+                        if (s.includes('@')) s = s.split('@').pop();
+                        const parts = s.split(':');
+                        const host = parts[0];
+                        const port = parts[1] || '';
+                        const found = proxiesList.find(p => p.host === host && String(p.port) === String(port));
+                        if (found) proxyInfo = { id: found.id, host: found.host, port: found.port, tags: found.tags || [] };
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+
             profilesData.push({
                 name: profile,
                 open: isOpen,
-                proxy: pdata.get('proxy') || false,
+                proxy: rawProxy || false,
                 proxyType: pdata.get('proxyType') || 'http',
-                fingerprint: pdata.get('fingerprint') || false
+                fingerprint: pdata.get('fingerprint') || false,
+                proxyInfo
             });
         }
 
@@ -134,23 +166,90 @@ app.delete('/api/profiles/:name', async (req, res) => {
 app.post('/api/profiles/:name/proxy', async (req, res) => {
     try {
         const { name } = req.params;
-        const { proxy } = req.body;
+        const { proxy, proxyId } = req.body;
 
-        console.log(`[API] set proxy for profile ${name} ->`, proxy);
+        console.log(`[API] set proxy for profile ${name} ->`, proxy || proxyId);
 
-        // Якщо профілю немає в базі, створимо автоматично (це важливо для тимчасових _test_proxy_* профілів)
+        // If profile missing: only auto-create for temporary test profiles
         const exists = await db.check_Profile(name);
         if (!exists) {
-            console.log(`[API] Profile ${name} not found in DB - creating automatically`);
-            await manage.create_Profile(name);
+            if (String(name).startsWith('_test_proxy_')) {
+                console.log(`[API] Profile ${name} not found in DB - creating automatically (temp)`);
+                await manage.create_Profile(name);
+            } else {
+                return res.status(404).json({ success: false, error: 'Profile not found' });
+            }
         }
 
+        // Get current profile object to know previous proxy (for unassigning)
+        const profileObj = await db.get_Profile(name);
+        const prevProxy = profileObj ? profileObj.get('proxy') : null;
+
+        // If proxyId provided - find proxy in global proxies and assign
+        if (proxyId) {
+            const list = readProxiesFile();
+            const found = list.find(p => p.id === proxyId);
+            if (!found) return res.status(404).json({ success: false, error: 'Proxy not found' });
+
+            // First unassign previous proxy if present
+            if (prevProxy) {
+                try {
+                    let prevMatchIndex = -1;
+                    if (prevProxy && typeof prevProxy === 'object' && prevProxy.id) {
+                        prevMatchIndex = list.findIndex(p => p.id === prevProxy.id);
+                    }
+                    if (prevMatchIndex === -1 && prevProxy && typeof prevProxy === 'object' && prevProxy.server) {
+                        prevMatchIndex = list.findIndex(p => p.server === prevProxy.server || `${p.host}:${p.port}` === prevProxy.server);
+                    }
+                    if (prevMatchIndex !== -1) {
+                        const prevItem = list[prevMatchIndex];
+                        if (Array.isArray(prevItem.assignedTo)) {
+                            prevItem.assignedTo = prevItem.assignedTo.filter(n => n !== name);
+                            list[prevMatchIndex] = prevItem;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error unassigning previous proxy:', e.message);
+                }
+            }
+
+            // Assign profile to found proxy (add to assignedTo array)
+            found.assignedTo = Array.isArray(found.assignedTo) ? found.assignedTo : [];
+            if (!found.assignedTo.includes(name)) found.assignedTo.push(name);
+
+            // Save proxies file
+            writeProxiesFile(list);
+
+            // Set profile proxy using manage helper (it accepts object)
+            await manage.set_ProfileProxy(name, Object.assign({}, found));
+
+            io.emit('profile_updated', { name, field: 'proxy' });
+            res.json({ success: true });
+            return;
+        }
+
+        // Old behavior: accept proxy string or object
         await manage.set_ProfileProxy(name, proxy);
+
+        // If proxy is an object with id and comes from global list, update assignedTo as well
+        try {
+            if (proxy && typeof proxy === 'object' && proxy.id) {
+                const list = readProxiesFile();
+                const found = list.find(p => p.id === proxy.id);
+                if (found) {
+                    found.assignedTo = Array.isArray(found.assignedTo) ? found.assignedTo : [];
+                    if (!found.assignedTo.includes(name)) found.assignedTo.push(name);
+                    writeProxiesFile(list);
+                }
+            }
+        } catch (e) {
+            console.error('Error updating proxies assignedTo:', e.message);
+        }
+
         io.emit('profile_updated', { name, field: 'proxy' });
         res.json({ success: true });
     } catch (error) {
         console.error(`[API] Error setting proxy for profile ${req.params.name}:`, error && error.message ? error.message : error);
-        // Повертаємо більше деталей для UI (без енв-даних)
         res.status(500).json({ success: false, error: String(error.message || error), stack: (error.stack || '').split('\n').slice(0,5) });
     }
 });
@@ -159,6 +258,30 @@ app.post('/api/profiles/:name/proxy', async (req, res) => {
 app.delete('/api/profiles/:name/proxy', async (req, res) => {
     try {
         const { name } = req.params;
+        // Find profile and its proxy to unassign from global list
+        const profile = await db.get_Profile(name);
+        const proxyVal = profile ? profile.get('proxy') : null;
+
+        if (proxyVal && typeof proxyVal === 'object') {
+            try {
+                const list = readProxiesFile();
+                // try match by id or server
+                let idx = -1;
+                if (proxyVal.id) idx = list.findIndex(p => p.id === proxyVal.id);
+                if (idx === -1 && proxyVal.server) idx = list.findIndex(p => p.server === proxyVal.server);
+                if (idx !== -1) {
+                    const item = list[idx];
+                    if (Array.isArray(item.assignedTo)) {
+                        item.assignedTo = item.assignedTo.filter(n => n !== name);
+                        list[idx] = item;
+                        writeProxiesFile(list);
+                    }
+                }
+            } catch (e) {
+                console.error('Error while unassigning proxy from list:', e.message);
+            }
+        }
+
         await manage.delete_ProfileProxy(name);
         io.emit('profile_updated', { name, field: 'proxy' });
 
@@ -187,6 +310,44 @@ app.post('/api/profiles/:name/proxy/test', async (req, res) => {
     }
 });
 
+// POST test global proxy by id
+app.post('/api/proxies/:id/test', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const list = readProxiesFile();
+        const proxy = list.find(p => p.id === id);
+        if (!proxy) return res.status(404).json({ success: false, error: 'Proxy not found' });
+        // Use stored proxy object or build server string
+        const proxyObj = Object.assign({}, proxy);
+        console.log(`[API] Testing proxy id=${id} rawObject=`, proxyObj);
+        const result = await testProxy(proxyObj);
+        // save test result and status back to proxies.json
+        try {
+            proxy.testResult = result.success ? result : { error: result.error };
+            proxy.status = result.success ? 'active' : 'failed';
+            writeProxiesFile(list);
+            io.emit('proxies_updated');
+        } catch (e) {
+            console.error('Failed to persist proxy test result', e.message);
+        }
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// POST test proxy by payload (proxy string or object)
+app.post('/api/proxies/test', async (req, res) => {
+    try {
+        const { proxy } = req.body;
+        if (!proxy) return res.status(400).json({ success: false, error: 'Proxy required in body' });
+        const result = await testProxy(proxy);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Helper для тестування проксі
 import { SocksProxyAgent } from 'socks-proxy-agent';
 import { HttpsProxyAgent } from 'https-proxy-agent';
@@ -200,7 +361,16 @@ async function testProxy(proxyStringOrObj) {
         if (!proxyStringOrObj) throw new Error('Empty proxy');
 
         if (typeof proxyStringOrObj === 'object') {
+            // Clone to avoid mutating original
             proxyObj = Object.assign({}, proxyStringOrObj);
+            // If stored proxies use host/port fields, build server field
+            if (!proxyObj.server && proxyObj.host && proxyObj.port) {
+                proxyObj.server = `${proxyObj.host}:${proxyObj.port}`;
+            }
+            // Ensure username/password fields are present under expected keys
+            if (!proxyObj.username && (proxyObj.user || proxyObj.login)) proxyObj.username = proxyObj.user || proxyObj.login;
+            if (!proxyObj.password && proxyObj.pass) proxyObj.password = proxyObj.pass;
+            if (!proxyObj.type) proxyObj.type = proxyObj.proxyType || 'http';
         } else if (typeof proxyStringOrObj === 'string') {
             let s = proxyStringOrObj.trim();
             // remove surrounding quotes if any
@@ -248,6 +418,7 @@ async function testProxy(proxyStringOrObj) {
             throw new Error('Unsupported proxy format');
         }
 
+        // After normalization ensure proxyObj has server
         if (!proxyObj || !proxyObj.server) {
             throw new Error('Invalid proxy format');
         }
@@ -435,6 +606,28 @@ app.delete('/api/proxies/:id', async (req, res) => {
         res.json({ success: true, deleted: before - list.length });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Launch ephemeral profile (one-shot, not saved)
+app.post('/api/profiles/ephemeral', async (req, res) => {
+    try {
+        const { proxyId, proxy } = req.body || {};
+        let proxyObj = null;
+        if (proxyId) {
+            const list = readProxiesFile();
+            const found = list.find(p => p.id === proxyId);
+            if (!found) return res.status(404).json({ success: false, error: 'Proxy not found' });
+            proxyObj = found;
+        } else if (proxy) {
+            proxyObj = proxy;
+        }
+
+        const result = await manage.launch_Ephemeral({ proxy: proxyObj });
+        res.json({ success: true, ephemeral: result.name });
+    } catch (error) {
+        console.error('[API] Ephemeral launch error:', error && error.message ? error.message : error);
+        res.status(500).json({ success: false, error: error && error.message ? error.message : String(error) });
     }
 });
 
