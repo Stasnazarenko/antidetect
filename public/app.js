@@ -645,146 +645,82 @@ safeOn('import-dropdown-btn', 'click', (e) => {
     const dd = getEl('import-dropdown'); if (!dd) return; dd.classList.toggle('open');
 });
 
-// Bind Proxy Manager header button (previously inline onclick caused openProxyManager not defined error)
-safeOn('open-proxy-manager-btn', 'click', () => {
-    try { window.openProxyManager(); } catch (e) { console.error('openProxyManager failed', e); }
-});
-
-// Open file input when user clicks Import Profiles menu
-safeOn('menu-import-profiles', 'click', () => {
-    const fi = getEl('profiles-file-input'); if (fi) fi.click();
-});
-
-// Parse uploaded profiles file and show import preview
-safeOn('profiles-file-input', 'change', async (e) => {
-    const input = e.target;
-    if (!input || !input.files || input.files.length === 0) return;
-    const file = input.files[0];
-    const text = await file.text();
-
-    // Normalize line endings
-    const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n').map(l => l.trim()).filter(Boolean);
-    if (lines.length === 0) {
-        showNotification('No lines found in file', 'error');
-        return;
-    }
-
-    // Detect delimiter (comma, semicolon, tab, pipe) by checking first non-empty line
-    const first = lines[0];
-    let delimiter = ',';
-    if (first.includes('\t')) delimiter = '\t';
-    else if (first.includes(';')) delimiter = ';';
-    else if (first.includes('|')) delimiter = '|';
-    else delimiter = ',';
-
-    // If header present (contains name or profile), skip it
-    const header = lines[0].toLowerCase();
-    let startIndex = 0;
-    if (header.includes('name') || header.includes('profile') || header.includes('profileName'.toLowerCase())) startIndex = 1;
-
-    const parsed = [];
-    for (let i = startIndex; i < lines.length; i++) {
-        const l = lines[i];
-        const parts = l.split(new RegExp(delimiter));
-        // Trim parts
-        const cols = parts.map(p => p.trim());
-        // At minimum must have name or profile
-        if (cols.length === 0) continue;
-        let name = cols[0] || '';
-        let proxy = cols[1] || '';
-        // If the line is like host:port with no explicit profile name, create a generated name
-        if (!name && proxy) {
-            name = `imported_${i}`;
-        }
-        if (!name) continue;
-        const item = { name };
-        if (proxy) {
-            // If proxy looks like an id (starts with _ or numeric) or contains host:port, pass as proxy string
-            item.proxy = proxy;
-        }
-        parsed.push(item);
-    }
-
-    // Populate preview modal
-    const countEl = getEl('import-preview-count'); if (countEl) countEl.textContent = `${parsed.length} profiles parsed`;
-    const table = getEl('import-preview-table'); if (table) {
-        // Build header
-        const headerRow = `<tr><th style="text-align:left;padding:6px;border-bottom:1px solid #e2e8f0">Name</th><th style="text-align:left;padding:6px;border-bottom:1px solid #e2e8f0">Proxy</th></tr>`;
-        const rows = parsed.map(p => `<tr><td style="padding:6px;border-bottom:1px solid #f1f5f9">${escapeHtml(p.name)}</td><td style="padding:6px;border-bottom:1px solid #f1f5f9">${escapeHtml(p.proxy||'')}</td></tr>`).join('');
-        table.innerHTML = headerRow + rows;
-    }
-
-    // Store parsed on the window for confirm handler
-    window.__importParsedProfiles = parsed;
-
-    // Show preview modal
-    const im = getEl('import-preview-modal'); if (im) im.style.display = 'block';
-
-    // Reset input value so selecting same file again will trigger change
-    input.value = '';
-});
-
-// Confirm import (send to server)
-safeOn('confirm-import-btn', 'click', async () => {
-    const toImport = window.__importParsedProfiles || [];
-    if (!Array.isArray(toImport) || toImport.length === 0) { showNotification('No profiles parsed', 'error'); return; }
-    try {
-        const resp = await fetch('/api/profiles/import', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ profiles: toImport }) });
-        const data = await resp.json();
-        if (data && data.success) {
-            showNotification(`Imported ${data.results ? data.results.filter(r=>r.success).length : toImport.length}/${toImport.length}`, 'success');
-            const im = getEl('import-preview-modal'); if (im) im.style.display = 'none';
-            // clear preview
-            const table = getEl('import-preview-table'); if (table) table.innerHTML = '';
-            const countEl = getEl('import-preview-count'); if (countEl) countEl.textContent = '0 profiles parsed';
-            window.__importParsedProfiles = [];
-            // reload profiles list
-            await loadProfiles();
-        } else {
-            showNotification(data.error || 'Import failed', 'error');
-        }
-    } catch (e) {
-        console.error('Confirm import failed', e);
-        showNotification('Import request failed', 'error');
-    }
-});
-
-// Cancel import preview
-safeOn('cancel-import-btn', 'click', () => {
-    const im = getEl('import-preview-modal'); if (im) im.style.display = 'none';
-    window.__importParsedProfiles = [];
-    const table = getEl('import-preview-table'); if (table) table.innerHTML = '';
-    const countEl = getEl('import-preview-count'); if (countEl) countEl.textContent = '0 profiles parsed';
-});
-
-// Small helper: escape html for table
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str).replace(/[&<>"']/g, function(m) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]; });
+// Dropdown helpers: close all dropdowns and toggle
+function closeAllDropdowns() {
+    const dds = document.querySelectorAll('.dropdown');
+    dds.forEach(dd => dd.classList.remove('open'));
 }
 
-// The following direct listeners were duplicated and could throw in some layouts. They are now handled via safeOn wrappers above.
-// Remove leftover direct listeners to avoid runtime errors.
+// Safer dropdown outside click handler and delegation for items
+(function setupDropdownBehavior(){
+    // Close dropdown when clicking outside: use closest to detect if inside a dropdown
+    document.addEventListener('click', (e) => {
+        const insideDropdown = !!e.target.closest('.dropdown');
+        if (!insideDropdown) closeAllDropdowns();
+    });
 
-/* START-REMOVE-DUPLICATE-LISTENERS */
-// removed: document.getElementById('test-proxy-btn').addEventListener(...)
-// removed: document.getElementById('regenerate-fp-btn').addEventListener(...)
-// removed: document.getElementById('close-fp-modal-btn').addEventListener(...)
-// removed: proxyForm.addEventListener('submit', ...)
-// removed: newProfileBtn.addEventListener('click', ...)
-// removed: newProfileForm.addEventListener('submit', ...)
-/* END-REMOVE-DUPLICATE-LISTENERS */
-
-// Provide global fallback for inline onclick="openProxyManager()" in index.html
-window.openProxyManager = function() {
-    try {
-        if (window.ipcRenderer && window.ipcRenderer.invoke) {
-            window.ipcRenderer.invoke('open-proxy-manager');
-            return;
+    // Close dropdown after clicking any .dropdown .item
+    document.addEventListener('click', (e) => {
+        const item = e.target.closest('.dropdown .item');
+        if (item) {
+            const dd = item.closest('.dropdown');
+            if (dd) dd.classList.remove('open');
         }
-    } catch (e) {}
-    window.open('/proxy-manager.html', '_blank');
-};
+    });
+})();
+
+// Ensure dropdowns close after selecting an item
+safeOn('menu-new-profile', 'click', async (e) => {
+    // existing handler logic runs (attached earlier), just close dropdown
+    const dd = getEl('create-dropdown'); if (dd) dd.classList.remove('open');
+});
+safeOn('menu-ephemeral', 'click', async (e) => {
+    const dd = getEl('create-dropdown'); if (dd) dd.classList.remove('open');
+});
+safeOn('menu-import-profiles', 'click', (e) => {
+    const dd = getEl('import-dropdown'); if (dd) dd.classList.remove('open');
+});
+safeOn('menu-template', 'click', (e) => {
+    const dd = getEl('import-dropdown'); if (dd) dd.classList.remove('open');
+    // Trigger template download or show instructions
+    // For now, open template file in new tab
+    window.open('/template.csv', '_blank');
+});
+
+// Bind Cleanup and Refresh buttons
+safeOn('cleanup-btn', 'click', async () => {
+    try {
+        const resp = await fetch('/api/cleanup', { method: 'POST' });
+        const data = await resp.json();
+        if (data && data.success) {
+            showNotification(`Cleanup finished: cleaned ${data.cleaned || 0}`, 'success');
+            await loadProfiles();
+        } else {
+            showNotification(data.error || 'Cleanup failed', 'error');
+        }
+    } catch (e) {
+        console.error('Cleanup error', e);
+        showNotification('Cleanup request failed', 'error');
+    }
+});
+
+safeOn('refresh-btn', 'click', async () => {
+    try {
+        await loadProfiles();
+        showNotification('Profiles refreshed', 'success');
+    } catch (e) {
+        console.error('Refresh error', e);
+        showNotification('Refresh failed', 'error');
+    }
+});
+
+// Also close dropdown when create or import button toggles are clicked (toggle handled earlier)
+safeOn('create-dropdown-btn', 'click', (e) => {
+    const dd = getEl('create-dropdown'); if (!dd) return; dd.classList.toggle('open');
+});
+safeOn('import-dropdown-btn', 'click', (e) => {
+    const dd = getEl('import-dropdown'); if (!dd) return; dd.classList.toggle('open');
+});
 
 // Debugging hooks: log load and capture global errors to help diagnose why UI may be frozen
 try {
@@ -833,6 +769,11 @@ function initApp() {
             }
         }
 
+        // Ensure ephemeral radios are attached on init
+        // (move these calls into initApp to avoid DOM timing issues)
+        attachEphemeralRadios();
+        updateEphemeralSelectVisibility();
+
         loadProfiles();
         // periodic refresh
         setInterval(loadProfiles, 5000);
@@ -847,4 +788,127 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initApp);
 } else {
     initApp();
+}
+
+// Ephemeral modal handlers
+safeOn('ephemeral-cancel-btn', 'click', () => {
+    const em = getEl('ephemeral-modal'); if (em) em.style.display = 'none';
+});
+
+// Show/hide ephemeral select based on radio option
+function updateEphemeralSelectVisibility() {
+    const radios = document.getElementsByName('ephemeral-proxy-option');
+    const select = getEl('ephemeral-proxy-select');
+    if (!radios || !select) return;
+    let selected = 'none';
+    for (const r of radios) if (r.checked) selected = r.value;
+    if (selected === 'choose') select.style.display = 'block';
+    else select.style.display = 'none';
+}
+
+// Attach change listeners to ephemeral radio buttons (deferred attach in initApp too)
+function attachEphemeralRadios() {
+    const radios = document.getElementsByName('ephemeral-proxy-option');
+    if (!radios) return;
+    for (const r of radios) {
+        r.addEventListener('change', updateEphemeralSelectVisibility);
+    }
+}
+
+safeOn('ephemeral-launch-btn', 'click', async () => {
+    const resultDiv = getEl('ephemeral-result'); if (resultDiv) { resultDiv.style.display = 'block'; resultDiv.innerHTML = '<div class="loader"></div> Launching...'; }
+    try {
+        const radios = document.getElementsByName('ephemeral-proxy-option');
+        let choice = 'none';
+        for (const r of radios) if (r.checked) choice = r.value;
+
+        let payload = {};
+        if (choice === 'none') {
+            // no proxy -> empty payload
+        } else if (choice === 'random') {
+            // pick a random saved proxy client-side
+            const resp = await fetch('/api/proxies');
+            const j = await resp.json();
+            const list = (j && j.proxies) ? j.proxies : [];
+            if (!Array.isArray(list) || list.length === 0) {
+                if (resultDiv) resultDiv.innerHTML = '<div style="background:#fed7d7;padding:10px;border-radius:6px;">❌ No saved proxies to pick randomly</div>';
+                return;
+            }
+            const idx = Math.floor(Math.random() * list.length);
+            const picked = list[idx];
+            payload.proxyId = picked.id || `${picked.host}:${picked.port}`;
+        } else if (choice === 'choose') {
+            const select = getEl('ephemeral-proxy-select');
+            if (select && select.value) payload.proxyId = select.value;
+            else {
+                if (resultDiv) resultDiv.innerHTML = '<div style="background:#fed7d7;padding:10px;border-radius:6px;">❌ Choose a proxy or select another option</div>';
+                return;
+            }
+        }
+
+        const resp2 = await fetch('/api/profiles/ephemeral', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
+        const data = await resp2.json();
+        if (data && data.success) {
+            if (resultDiv) resultDiv.innerHTML = `<div style="background:#c6f6d5;padding:10px;border-radius:6px;">✅ Launched ephemeral: ${data.ephemeral}</div>`;
+            // hide modal after short delay
+            setTimeout(() => { const em = getEl('ephemeral-modal'); if (em) em.style.display = 'none'; }, 900);
+        } else {
+            if (resultDiv) resultDiv.innerHTML = `<div style="background:#fed7d7;padding:10px;border-radius:6px;">❌ ${data && data.error ? data.error : 'Failed to launch'}</div>`;
+        }
+    } catch (e) {
+        console.error('Ephemeral launch error', e);
+        const resultDiv2 = getEl('ephemeral-result'); if (resultDiv2) resultDiv2.innerHTML = `<div style="background:#fed7d7;padding:10px;border-radius:6px;">❌ ${e && e.message ? e.message : String(e)}</div>`;
+    }
+});
+
+// Ensure ephemeral radios are attached on init
+// (move these calls into initApp to avoid DOM timing issues)
+// (додано в initApp без коментарів)
+
+// Fallback: ensure critical header buttons always have handlers (in case safeOn missed them)
+try {
+    const cb = getEl('create-dropdown-btn');
+    if (cb && !cb._fallbackAttached) {
+        cb.addEventListener('click', (e) => {
+            const dd = getEl('create-dropdown'); if (!dd) return; dd.classList.toggle('open');
+        });
+        cb._fallbackAttached = true;
+    }
+
+    const ib = getEl('import-dropdown-btn');
+    if (ib && !ib._fallbackAttached) {
+        ib.addEventListener('click', (e) => {
+            const dd = getEl('import-dropdown'); if (!dd) return; dd.classList.toggle('open');
+        });
+        ib._fallbackAttached = true;
+    }
+
+    const pb = getEl('open-proxy-manager-btn');
+    if (pb && !pb._fallbackAttached) {
+        pb.addEventListener('click', (e) => {
+            try { window.openProxyManager(); } catch (err) { console.error('openProxyManager fallback failed', err); }
+        });
+        pb._fallbackAttached = true;
+    }
+
+    const cleanupBtn = getEl('cleanup-btn');
+    if (cleanupBtn && !cleanupBtn._fallbackAttached) {
+        cleanupBtn.addEventListener('click', async () => {
+            try {
+                const resp = await fetch('/api/cleanup', { method: 'POST' });
+                const data = await resp.json();
+                if (data && data.success) { showNotification(`Cleanup finished: cleaned ${data.cleaned || 0}`, 'success'); await loadProfiles(); }
+                else { showNotification(data.error || 'Cleanup failed', 'error'); }
+            } catch (e) { console.error('Cleanup fallback error', e); showNotification('Cleanup request failed', 'error'); }
+        });
+        cleanupBtn._fallbackAttached = true;
+    }
+
+    const refreshBtn = getEl('refresh-btn');
+    if (refreshBtn && !refreshBtn._fallbackAttached) {
+        refreshBtn.addEventListener('click', async () => { try { await loadProfiles(); showNotification('Profiles refreshed', 'success'); } catch (e) { console.error('Refresh fallback error', e); showNotification('Refresh failed', 'error'); } });
+        refreshBtn._fallbackAttached = true;
+    }
+} catch (e) {
+    console.warn('Fallback header bindings failed', e);
 }

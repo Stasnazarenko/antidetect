@@ -25,6 +25,8 @@ header {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    position: relative; /* ensure stacking context */
+    z-index: 1050; /* sit above most content */
 }
 
 header h1 {
@@ -35,6 +37,9 @@ header h1 {
 .header-actions {
     display: flex;
     gap: 10px;
+    position: relative;
+    z-index: 1100; /* ensure header buttons are above modal overlays */
+    pointer-events: auto; /* ensure clicks reach buttons */
 }
 
 .btn {
