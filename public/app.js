@@ -613,18 +613,36 @@ safeOn('new-profile-form', 'submit', async (e) => {
 
 // Header buttons: create / import / proxy manager / cleanup / refresh
 safeOn('create-dropdown-btn', 'click', (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
     // toggle dropdown menu visibility
     const dd = getEl('create-dropdown');
     if (!dd) return;
     dd.classList.toggle('open');
 });
 
-safeOn('menu-new-profile', 'click', async () => {
+safeOn('import-dropdown-btn', 'click', (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const dd = getEl('import-dropdown'); if (!dd) return; dd.classList.toggle('open');
+});
+
+safeOn('advanced-dropdown-btn', 'click', (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const dd = getEl('advanced-dropdown'); if (!dd) return; dd.classList.toggle('open');
+});
+
+safeOn('menu-new-profile', 'click', async (e) => {
+    console.debug('[app.js] menu-new-profile clicked', e && e.target);
+    if (e && e.stopPropagation) e.stopPropagation();
+    // close the dropdown immediately
+    const dd = getEl('create-dropdown'); if (dd) dd.classList.remove('open');
     await loadProxiesIntoSelect(getEl('new-profile-proxy-select'));
     showModal('new-profile-modal');
 });
 
-safeOn('menu-ephemeral', 'click', async () => {
+safeOn('menu-ephemeral', 'click', async (e) => {
+    console.debug('[app.js] menu-ephemeral clicked', e && e.target);
+    if (e && e.stopPropagation) e.stopPropagation();
+    const dd = getEl('create-dropdown'); if (dd) dd.classList.remove('open');
     // populate ephemeral proxy select
     const select = getEl('ephemeral-proxy-select');
     if (select) {
@@ -641,22 +659,38 @@ safeOn('menu-ephemeral', 'click', async () => {
     const em = getEl('ephemeral-modal'); if (em) em.style.display = 'block';
 });
 
-safeOn('import-dropdown-btn', 'click', (e) => {
-    const dd = getEl('import-dropdown'); if (!dd) return; dd.classList.toggle('open');
+safeOn('menu-import-profiles', 'click', (e) => {
+    console.debug('[app.js] menu-import-profiles clicked', e && e.target);
+    if (e && e.stopPropagation) e.stopPropagation();
+    const dd = getEl('import-dropdown'); if (dd) dd.classList.remove('open');
+    // open import modal or trigger file input
+    const fi = getEl('profiles-file-input'); if (fi) fi.click();
 });
 
-// Delegation fallback: ensure header buttons work even if direct listeners were not attached
-document.addEventListener('click', (e) => {
+safeOn('menu-template', 'click', (e) => {
+    console.debug('[app.js] menu-template clicked', e && e.target);
+    if (e && e.stopPropagation) e.stopPropagation();
+    const dd = getEl('import-dropdown'); if (dd) dd.classList.remove('open');
+    // Trigger template download
+    window.open('/template.csv', '_blank');
+});
+
+safeOn('menu-cleanup', 'click', async (e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const dd = getEl('advanced-dropdown'); if (dd) dd.classList.remove('open');
     try {
-        const cbtn = e.target.closest('#create-dropdown-btn');
-        if (cbtn) { const dd = getEl('create-dropdown'); if (dd) dd.classList.toggle('open'); return; }
-        const ibtn = e.target.closest('#import-dropdown-btn');
-        if (ibtn) { const dd = getEl('import-dropdown'); if (dd) dd.classList.toggle('open'); return; }
-        const abtn = e.target.closest('#advanced-dropdown-btn');
-        if (abtn) { const dd = getEl('advanced-dropdown'); if (dd) dd.classList.toggle('open'); return; }
-        const pbtn = e.target.closest('#open-proxy-manager-btn');
-        if (pbtn) { try { if (typeof window.openProxyManager === 'function') window.openProxyManager(); else window.open('/proxy-manager.html', '_blank'); } catch (err) { try { window.open('/proxy-manager.html', '_blank'); } catch(e){} } return; }
-    } catch (e) { /* swallow */ }
+        const res = await fetch('/api/cleanup', { method: 'POST' });
+        const data = await res.json();
+        if (data && data.success) {
+            showNotification(`Cleanup finished: cleaned ${data.cleaned || 0}`, 'success');
+            await loadProfiles();
+        } else {
+            showNotification((data && data.error) || 'Cleanup failed', 'error');
+        }
+    } catch (e) {
+        console.error('menu-cleanup error', e);
+        showNotification('Cleanup request failed', 'error');
+    }
 });
 
 // Dropdown helpers: close all dropdowns and toggle
@@ -675,8 +709,8 @@ function closeAllDropdowns() {
 
     // Close dropdown after clicking any .dropdown .item
     document.addEventListener('click', (e) => {
-        const item = e.target.closest('.dropdown .item');
-        if (item) {
+        const item = e.target.closest('.item');
+        if (item && item.closest('.dropdown')) {
             const dd = item.closest('.dropdown');
             if (dd) dd.classList.remove('open');
         }
@@ -794,6 +828,9 @@ function initApp() {
         // (move these calls into initApp to avoid DOM timing issues)
         attachEphemeralRadios();
         updateEphemeralSelectVisibility();
+
+        // attach strong header captures now that DOM is ready
+        try { attachStrongHeaderCaptures(); } catch(e) { console.warn('attachStrongHeaderCaptures failed at init', e); }
 
         loadProfiles();
         // periodic refresh
@@ -935,59 +972,105 @@ safeOn('ephemeral-launch-btn', 'click', async () => {
     }
 });
 
-// Ensure ephemeral radios are attached on init
-// (move these calls into initApp to avoid DOM timing issues)
-// (додано в initApp без коментарів)
+// Strong capture-phase handlers to guarantee header buttons respond
+function attachStrongHeaderCaptures() {
+    try {
+        const createBtn = getEl('create-dropdown-btn');
+        if (createBtn && !createBtn._strongCapture) {
+            createBtn.addEventListener('click', (e) => {
+                e.stopImmediatePropagation(); e.preventDefault();
+                const dd = getEl('create-dropdown'); if (!dd) return; dd.classList.toggle('open');
+                console.debug('[app.js][strongCapture] create-dropdown-btn toggled');
+            }, true); // capture
+            createBtn._strongCapture = true;
+        }
 
-// Fallback: ensure critical header buttons always have handlers (in case safeOn missed them)
-try {
-    const cb = getEl('create-dropdown-btn');
-    if (cb && !cb._fallbackAttached) {
-        cb.addEventListener('click', (e) => {
-            const dd = getEl('create-dropdown'); if (!dd) return; dd.classList.toggle('open');
-        });
-        cb._fallbackAttached = true;
-    }
+        const importBtn = getEl('import-dropdown-btn');
+        if (importBtn && !importBtn._strongCapture) {
+            importBtn.addEventListener('click', (e) => {
+                e.stopImmediatePropagation(); e.preventDefault();
+                const dd = getEl('import-dropdown'); if (!dd) return; dd.classList.toggle('open');
+                console.debug('[app.js][strongCapture] import-dropdown-btn toggled');
+            }, true);
+            importBtn._strongCapture = true;
+        }
 
-    const ib = getEl('import-dropdown-btn');
-    if (ib && !ib._fallbackAttached) {
-        ib.addEventListener('click', (e) => {
-            const dd = getEl('import-dropdown'); if (!dd) return; dd.classList.toggle('open');
-        });
-        ib._fallbackAttached = true;
-    }
+        const advBtn = getEl('advanced-dropdown-btn');
+        if (advBtn && !advBtn._strongCapture) {
+            advBtn.addEventListener('click', (e) => {
+                e.stopImmediatePropagation(); e.preventDefault();
+                const dd = getEl('advanced-dropdown'); if (!dd) return; dd.classList.toggle('open');
+                console.debug('[app.js][strongCapture] advanced-dropdown-btn toggled');
+            }, true);
+            advBtn._strongCapture = true;
+        }
 
-    const pb = getEl('open-proxy-manager-btn');
-    if (pb && !pb._fallbackAttached) {
-        pb.addEventListener('click', (e) => {
-            try {
-                if (typeof window.openProxyManager === 'function') {
-                    window.openProxyManager();
-                } else {
-                    // fallback: open the proxy manager page in a new tab/window
-                    window.open('/proxy-manager.html', '_blank');
-                }
-            } catch (err) {
-                console.error('openProxyManager fallback failed', err);
-                // as last resort open the page
-                try { window.open('/proxy-manager.html', '_blank'); } catch(e){}
-            }
-        });
-        pb._fallbackAttached = true;
-    }
-
-    const cleanupBtn = getEl('cleanup-btn');
-    if (cleanupBtn && !cleanupBtn._fallbackAttached) {
-        cleanupBtn.addEventListener('click', async () => {
-            try {
-                const resp = await fetch('/api/cleanup', { method: 'POST' });
-                const data = await resp.json();
-                if (data && data.success) { showNotification(`Cleanup finished: cleaned ${data.cleaned || 0}`, 'success'); await loadProfiles(); }
-                else { showNotification(data.error || 'Cleanup failed', 'error'); }
-            } catch (e) { console.error('Cleanup fallback error', e); showNotification('Cleanup request failed', 'error'); }
-        });
-        cleanupBtn._fallbackAttached = true;
-    }
-} catch (e) {
-    console.warn('Fallback header bindings failed', e);
+        const proxyBtn = getEl('open-proxy-manager-btn');
+        if (proxyBtn && !proxyBtn._strongCapture) {
+            proxyBtn.addEventListener('click', (e) => {
+                e.stopImmediatePropagation(); e.preventDefault();
+                try { if (typeof window.openProxyManager === 'function') window.openProxyManager(); else window.open('/proxy-manager.html', '_blank'); } catch (err) { try { window.open('/proxy-manager.html', '_blank'); } catch(e){} }
+                console.debug('[app.js][strongCapture] open-proxy-manager-btn fired');
+            }, true);
+            proxyBtn._strongCapture = true;
+        }
+    } catch (e) { console.error('attachStrongHeaderCaptures failed', e); }
 }
+
+// call moved into initApp to ensure DOM is ready
+
+// Global capture: if user clicks inside header area but top element isn't header (blocked by overlay), hide/disable it so header buttons work
+document.addEventListener('click', function captureHeaderClicks(e) {
+    try {
+        const header = document.querySelector('header');
+        if (!header) return;
+        const rect = header.getBoundingClientRect();
+        const x = e.clientX, y = e.clientY;
+        if (x == null || y == null) return;
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+            const topEl = document.elementFromPoint(x, y);
+            if (topEl && !header.contains(topEl)) {
+                // If it's a modal or overlay, hide it
+                const modal = topEl.closest('.modal');
+                if (modal && modal.style.display !== 'none') {
+                    console.debug('[app.js] capture: hiding blocking modal to allow header click', modal);
+                    modal.style.display = 'none';
+                    modal.style.pointerEvents = 'none';
+                    // prevent the original event from propagating further (we handled overlay)
+                    e.stopPropagation();
+                    e.preventDefault();
+                    return;
+                }
+                // If not a modal, but element has high z-index, disable its pointer-events temporarily
+                try {
+                    const cs = getComputedStyle(topEl);
+                    const z = parseInt(cs.zIndex) || 0;
+                    if (z > 1000) {
+                        console.debug('[app.js] capture: disabling pointer-events on blocking element', topEl);
+                        topEl.style.pointerEvents = 'none';
+                        header.style.zIndex = '1000000';
+                        header.style.pointerEvents = 'auto';
+                        // prevent original click from acting on the overlay
+                        e.stopPropagation();
+                        e.preventDefault();
+                        return;
+                    }
+                } catch (err) { /* ignore */ }
+            }
+        }
+    } catch (err) { console.error('captureHeaderClicks error', err); }
+}, true);
+
+// Ensure header/action buttons always accept pointer events and are on top
+(function ensureHeaderButtonsInteractive(){
+    try {
+        const btns = ['create-dropdown-btn','import-dropdown-btn','advanced-dropdown-btn','open-proxy-manager-btn'];
+        for (const id of btns) {
+            const el = getEl(id);
+            if (!el) continue;
+            el.style.pointerEvents = 'auto';
+            el.style.zIndex = '1000001';
+        }
+    } catch(e){ console.error('ensureHeaderButtonsInteractive failed', e); }
+})();
+

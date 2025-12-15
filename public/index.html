@@ -21,7 +21,7 @@
             </div>
 
             <div class="dropdown" id="create-dropdown">
-                <button class="btn btn-success" id="create-dropdown-btn">➕ Create</button>
+                <button type="button" class="btn btn-success" id="create-dropdown-btn" onclick="(function(ev){ if (ev && ev.stopPropagation) ev.stopPropagation(); try{ ev.preventDefault(); }catch(e){} const dd=document.getElementById('create-dropdown'); if(dd) dd.classList.toggle('open'); console.debug('[inline] create-dropdown toggled'); })(event)">➕ Create</button>
                 <div class="dropdown-menu">
                     <div class="item" id="menu-new-profile"><span class="icon">➕</span> <span>New Profile</span></div>
                     <div class="item" id="menu-ephemeral"><span class="icon">🎲</span> <span>Ephemeral</span></div>
@@ -29,24 +29,24 @@
             </div>
 
             <div class="dropdown" id="import-dropdown">
-                <button class="btn btn-outline" id="import-dropdown-btn">📥 Import</button>
+                <button type="button" class="btn btn-outline" id="import-dropdown-btn" onclick="(function(ev){ if (ev && ev.stopPropagation) ev.stopPropagation(); try{ ev.preventDefault(); }catch(e){} const dd=document.getElementById('import-dropdown'); if(dd) dd.classList.toggle('open'); console.debug('[inline] import-dropdown toggled'); })(event)">📥 Import</button>
                 <div class="dropdown-menu">
                     <div class="item" id="menu-import-profiles"><span class="icon">📥</span> <span>Import Profiles</span></div>
                     <div class="item" id="menu-template"><span class="icon">⬇️</span> <span>Template</span></div>
                 </div>
             </div>
 
-            <button id="open-proxy-manager-btn" class="btn btn-primary">🌐 Proxy Manager</button>
+            <button id="open-proxy-manager-btn" class="btn btn-primary" type="button" onclick="(function(ev){ if (ev && ev.stopPropagation) ev.stopPropagation(); try{ ev.preventDefault(); }catch(e){} try{ if (typeof window.openProxyManager === 'function') window.openProxyManager(); else window.open('/proxy-manager.html','_blank'); } catch(err){ try{ window.open('/proxy-manager.html','_blank'); }catch(e){} } })(event)">🌐 Proxy Manager</button>
 
             <!-- Advanced dropdown: move Cleanup here -->
             <div class="dropdown" id="advanced-dropdown">
-                <button class="btn btn-outline" id="advanced-dropdown-btn">⚙️ Advanced</button>
+                <button type="button" class="btn btn-outline" id="advanced-dropdown-btn" onclick="(function(ev){ if (ev && ev.stopPropagation) ev.stopPropagation(); try{ ev.preventDefault(); }catch(e){} const dd=document.getElementById('advanced-dropdown'); if(dd) dd.classList.toggle('open'); console.debug('[inline] advanced-dropdown toggled'); })(event)">⚙️ Advanced</button>
                 <div class="dropdown-menu">
                     <div class="item" id="menu-cleanup"><span class="icon">🧹</span> <span>Cleanup</span></div>
                 </div>
             </div>
 
-            <button id="cleanup-btn" class="btn btn-warning" style="display:none">🧹 Cleanup</button>
+            <button id="cleanup-btn" class="btn btn-warning" style="display:none" type="button">🧹 Cleanup</button>
             <!-- Refresh removed from header per request -->
             <input id="profiles-file-input" type="file" accept=".txt,.csv,.tsv" style="display:none" />
         </div>

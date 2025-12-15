@@ -28,7 +28,36 @@ class BrowserManager:
                 {"cores": 10, "inner_w": 1920, "inner_h": 1080, "outer_w": 1980, "outer_h": 1160},
                 {"cores": 12, "inner_w": 1680, "inner_h": 1050, "outer_w": 1740, "outer_h": 1130},
             ]
-            variant = random.choice(mac_variants)
+            rm_mac_variants = [
+                # 1–2. MacBook Air 13" M1/M2/M3/M4 (роздільна здатність 2560×1600 @2x, масштабування "looks like 1440×900")
+                {"cores": 8,  "inner_w": 1440, "inner_h": 900, "outer_w": 1440, "outer_h": 969},   # dock зверху/знизу
+                {"cores": 10, "inner_w": 1440, "inner_h": 900, "outer_w": 1440, "outer_h": 969},
+
+                # 3–4. MacBook Air 15" M2/M3/M4 (2880×1864 @2x → looks like 1512×982)
+                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 1051},
+                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 1062},
+
+                # 5–8. MacBook Pro 14" M1–M4 Pro/Max (3024×1964 @2x → looks like 1512×982 або 1728×1117)
+                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 1051},   # default scaling
+                {"cores": 12, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 1051},
+                {"cores": 12, "inner_w": 1728, "inner_h": 1117, "outer_w": 1728, "outer_h": 1186},  # "more space"
+                {"cores": 14, "inner_w": 1728, "inner_h": 1117, "outer_w": 1728, "outer_h": 1186},
+
+                # 9–12. MacBook Pro 16" M1–M4 Pro/Max (3456×2234 @2x → looks like 1728×1117 або 1920×1200)
+                {"cores": 10, "inner_w": 1728, "inner_h": 1117, "outer_w": 1728, "outer_h": 1186},
+                {"cores": 12, "inner_w": 1728, "inner_h": 1117, "outer_w": 1728, "outer_h": 1186},
+                {"cores": 14, "inner_w": 1920, "inner_h": 1200, "outer_w": 1920, "outer_h": 1269},   # "more space"
+                {"cores": 16, "inner_w": 1920, "inner_h": 1200, "outer_w": 1920, "outer_h": 1269},
+
+                # 13–14. Зовнішній монітор 2560×1440 (ультравайд або 27" 2K) підключений до ARM Mac
+                {"cores": 12, "inner_w": 2560, "inner_h": 1440, "outer_w": 2560, "outer_h": 1509},
+                {"cores": 14, "inner_w": 2560, "inner_h": 1440, "outer_w": 2560, "outer_h": 1509},
+
+                # 15. Ультравайд 3440×1440 (популярний зовнішній монітор для M-серії)
+                {"cores": 14, "inner_w": 3440, "inner_h": 1440, "outer_w": 3440, "outer_h": 1509},
+            ]
+
+            variant = random.choice(rm_mac_variants)
 
             mac_arm_user_agents = [
                 # 1. M4 Pro MacBook Pro 14" – macOS 15.2
