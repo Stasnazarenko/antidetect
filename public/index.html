@@ -37,8 +37,17 @@
             </div>
 
             <button id="open-proxy-manager-btn" class="btn btn-primary">🌐 Proxy Manager</button>
-            <button id="cleanup-btn" class="btn btn-warning">🧹 Cleanup</button>
-            <button id="refresh-btn" class="btn btn-primary">🔄 Refresh</button>
+
+            <!-- Advanced dropdown: move Cleanup here -->
+            <div class="dropdown" id="advanced-dropdown">
+                <button class="btn btn-outline" id="advanced-dropdown-btn">⚙️ Advanced</button>
+                <div class="dropdown-menu">
+                    <div class="item" id="menu-cleanup"><span class="icon">🧹</span> <span>Cleanup</span></div>
+                </div>
+            </div>
+
+            <button id="cleanup-btn" class="btn btn-warning" style="display:none">🧹 Cleanup</button>
+            <!-- Refresh removed from header per request -->
             <input id="profiles-file-input" type="file" accept=".txt,.csv,.tsv" style="display:none" />
         </div>
         </header>

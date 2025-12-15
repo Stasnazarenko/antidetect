@@ -645,6 +645,20 @@ safeOn('import-dropdown-btn', 'click', (e) => {
     const dd = getEl('import-dropdown'); if (!dd) return; dd.classList.toggle('open');
 });
 
+// Delegation fallback: ensure header buttons work even if direct listeners were not attached
+document.addEventListener('click', (e) => {
+    try {
+        const cbtn = e.target.closest('#create-dropdown-btn');
+        if (cbtn) { const dd = getEl('create-dropdown'); if (dd) dd.classList.toggle('open'); return; }
+        const ibtn = e.target.closest('#import-dropdown-btn');
+        if (ibtn) { const dd = getEl('import-dropdown'); if (dd) dd.classList.toggle('open'); return; }
+        const abtn = e.target.closest('#advanced-dropdown-btn');
+        if (abtn) { const dd = getEl('advanced-dropdown'); if (dd) dd.classList.toggle('open'); return; }
+        const pbtn = e.target.closest('#open-proxy-manager-btn');
+        if (pbtn) { try { if (typeof window.openProxyManager === 'function') window.openProxyManager(); else window.open('/proxy-manager.html', '_blank'); } catch (err) { try { window.open('/proxy-manager.html', '_blank'); } catch(e){} } return; }
+    } catch (e) { /* swallow */ }
+});
+
 // Dropdown helpers: close all dropdowns and toggle
 function closeAllDropdowns() {
     const dds = document.querySelectorAll('.dropdown');
@@ -704,23 +718,30 @@ safeOn('cleanup-btn', 'click', async () => {
     }
 });
 
-safeOn('refresh-btn', 'click', async () => {
+// Remove any direct references to refresh-btn by making sure safeOn('refresh-btn', ...) no longer throws
+// Add handler for advanced cleanup menu item
+safeOn('menu-cleanup', 'click', async () => {
+    // Close any open dropdowns safely
+    const dd = getEl('advanced-dropdown'); if (dd) dd.classList.remove('open');
     try {
-        await loadProfiles();
-        showNotification('Profiles refreshed', 'success');
+        const res = await fetch('/api/cleanup', { method: 'POST' });
+        const data = await res.json();
+        if (data && data.success) {
+            showNotification(`Cleanup finished: cleaned ${data.cleaned || 0}`, 'success');
+            await loadProfiles();
+        } else {
+            showNotification((data && data.error) || 'Cleanup failed', 'error');
+        }
     } catch (e) {
-        console.error('Refresh error', e);
-        showNotification('Refresh failed', 'error');
+        console.error('menu-cleanup error', e);
+        showNotification('Cleanup request failed', 'error');
     }
 });
 
-// Also close dropdown when create or import button toggles are clicked (toggle handled earlier)
-safeOn('create-dropdown-btn', 'click', (e) => {
-    const dd = getEl('create-dropdown'); if (!dd) return; dd.classList.toggle('open');
-});
-safeOn('import-dropdown-btn', 'click', (e) => {
-    const dd = getEl('import-dropdown'); if (!dd) return; dd.classList.toggle('open');
-});
+// Hide the old refresh button if present (safety)
+const oldRefresh = getEl('refresh-btn'); if (oldRefresh) oldRefresh.style.display = 'none';
+// Hide direct cleanup-btn (we moved it into Advanced menu)
+const oldCleanup = getEl('cleanup-btn'); if (oldCleanup) oldCleanup.style.display = 'none';
 
 // Debugging hooks: log load and capture global errors to help diagnose why UI may be frozen
 try {
@@ -777,6 +798,59 @@ function initApp() {
         loadProfiles();
         // periodic refresh
         setInterval(loadProfiles, 5000);
+
+        // Safety check: detect if header area is covered by any element that blocks clicks
+        try {
+            const headerEl = document.querySelector('header');
+            if (headerEl) {
+                const r = headerEl.getBoundingClientRect();
+                // sample several points across header to be robust
+                const samples = 5;
+                for (let i = 0; i < samples; i++) {
+                    const sampleX = Math.round(r.left + (r.width * (i + 0.5) / samples));
+                    const sampleY = Math.round(r.top + r.height / 2);
+                    const topEl = document.elementFromPoint(sampleX, sampleY);
+                    if (topEl && !headerEl.contains(topEl) && topEl !== headerEl) {
+                        console.warn('[UI] Header appears to be overlapped by:', topEl, 'at point', sampleX, sampleY);
+                        try { console.warn('[UI] topEl computed styles:', getComputedStyle(topEl)); } catch(e){}
+
+                        // If it's a modal overlay or modal-content, try to hide it (recoverable action)
+                        const modal = topEl.closest('.modal');
+                        if (modal) {
+                            console.info('[UI] Attempting to hide blocking modal:', modal);
+                            try {
+                                modal.style.display = 'none';
+                                // also remove any inline overlay opacity/pointer events
+                                modal.style.pointerEvents = 'none';
+                                // give header priority
+                                headerEl.style.zIndex = '1000000';
+                                headerEl.style.pointerEvents = 'auto';
+                                console.info('[UI] Hidden modal to restore header interaction');
+                            } catch (e) {
+                                console.error('[UI] Failed to hide modal', e);
+                            }
+                            break; // after fixing one sample re-evaluate later
+                        }
+
+                        // If blocking element is not modal but has high z-index, try to disable its pointer events
+                        try {
+                            const cs = getComputedStyle(topEl);
+                            const z = parseInt(cs.zIndex) || 0;
+                            if (z > 0) {
+                                console.info('[UI] Temporarily disabling pointer-events on blocking element to recover header clicks');
+                                topEl.style.pointerEvents = 'none';
+                                // ensure header receives clicks
+                                headerEl.style.zIndex = '1000000';
+                                headerEl.style.pointerEvents = 'auto';
+                                break;
+                            }
+                        } catch (e) { console.error('[UI] error while trying to disable blocking element', e); }
+                    } else {
+                        console.log('[UI] Header area sample not overlapped. topEl:', topEl);
+                    }
+                }
+            }
+        } catch (e) { console.error('Header overlap detection failed', e); }
 
         console.log('[app.js] initApp finished');
     } catch (e) {
@@ -886,7 +960,18 @@ try {
     const pb = getEl('open-proxy-manager-btn');
     if (pb && !pb._fallbackAttached) {
         pb.addEventListener('click', (e) => {
-            try { window.openProxyManager(); } catch (err) { console.error('openProxyManager fallback failed', err); }
+            try {
+                if (typeof window.openProxyManager === 'function') {
+                    window.openProxyManager();
+                } else {
+                    // fallback: open the proxy manager page in a new tab/window
+                    window.open('/proxy-manager.html', '_blank');
+                }
+            } catch (err) {
+                console.error('openProxyManager fallback failed', err);
+                // as last resort open the page
+                try { window.open('/proxy-manager.html', '_blank'); } catch(e){}
+            }
         });
         pb._fallbackAttached = true;
     }
@@ -902,12 +987,6 @@ try {
             } catch (e) { console.error('Cleanup fallback error', e); showNotification('Cleanup request failed', 'error'); }
         });
         cleanupBtn._fallbackAttached = true;
-    }
-
-    const refreshBtn = getEl('refresh-btn');
-    if (refreshBtn && !refreshBtn._fallbackAttached) {
-        refreshBtn.addEventListener('click', async () => { try { await loadProfiles(); showNotification('Profiles refreshed', 'success'); } catch (e) { console.error('Refresh fallback error', e); showNotification('Refresh failed', 'error'); } });
-        refreshBtn._fallbackAttached = true;
     }
 } catch (e) {
     console.warn('Fallback header bindings failed', e);

@@ -30,13 +30,48 @@ class BrowserManager:
             ]
             variant = random.choice(mac_variants)
 
+            mac_arm_user_agents = [
+                # 1. M4 Pro MacBook Pro 14" – macOS 15.2
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
+
+                # 2. M4 Pro MacBook Pro 16" – macOS 15.2
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
+
+                # 3. M3 Max MacBook Pro 16" – macOS 15.1
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
+
+                # 4. M2 Pro MacBook Pro 14" – macOS 15.2
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/145.0",
+
+                # 5. M4 MacBook Air 15" – macOS 15.2
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
+
+                # 6. M3 Pro MacBook Pro 14" – macOS 15.1
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
+
+                # 7. M1 Max MacBook Pro 16" – macOS 15.2
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/145.0",
+
+                # 8. M4 Pro iMac 24" – macOS 15.2
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
+
+                # 9. M2 Mac mini – macOS 15.1
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
+
+                # 10. M4 Max MacBook Pro 16" – macOS 15.2
+                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
+            ]
+
+            # Приклад випадкового вибору
+            random_user_agent = random.choice(mac_arm_user_agents)
+
             return {
                 'window.outerHeight': variant["outer_h"],
                 'window.outerWidth': variant["outer_w"],
                 'window.innerHeight': variant["inner_h"],
                 'window.innerWidth': variant["inner_w"],
                 'window.history.length': random.randint(2, 20),
-                'navigator.userAgent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0',
+                'navigator.userAgent': random_user_agent,
                 'navigator.appCodeName': 'Mozilla',
                 'navigator.appName': 'Netscape',
                 'navigator.appVersion': '5.0 (Macintosh)',
