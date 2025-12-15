@@ -1,6 +1,7 @@
 {
   "name": "antidetect-browser",
   "version": "1.0.0",
+  "type": "module",
   "description": "Professional Antidetect Browser Manager",
   "main": "main.cjs",
   "scripts": {

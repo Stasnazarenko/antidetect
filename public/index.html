@@ -17,11 +17,29 @@
                 <button id="bulk-close-btn" class="btn btn-danger">⏹️ Close Selected</button>
                 <button id="bulk-delete-btn" class="btn btn-danger">🗑️ Delete Selected</button>
                 <button id="deselect-all-btn" class="btn btn-secondary">✖️ Deselect All</button>
+                <button id="select-all-btn" class="btn btn-secondary">✔️ Select All</button>
             </div>
-            <button onclick="window.location.href='/proxy-manager.html'" class="btn btn-primary">🌐 Proxy Manager</button>
+
+            <div class="dropdown" id="create-dropdown">
+                <button class="btn btn-success" id="create-dropdown-btn">➕ Create</button>
+                <div class="dropdown-menu">
+                    <div class="item" id="menu-new-profile"><span class="icon">➕</span> <span>New Profile</span></div>
+                    <div class="item" id="menu-ephemeral"><span class="icon">🎲</span> <span>Ephemeral</span></div>
+                </div>
+            </div>
+
+            <div class="dropdown" id="import-dropdown">
+                <button class="btn btn-outline" id="import-dropdown-btn">📥 Import</button>
+                <div class="dropdown-menu">
+                    <div class="item" id="menu-import-profiles"><span class="icon">📥</span> <span>Import Profiles</span></div>
+                    <div class="item" id="menu-template"><span class="icon">⬇️</span> <span>Template</span></div>
+                </div>
+            </div>
+
+            <button id="open-proxy-manager-btn" class="btn btn-primary">🌐 Proxy Manager</button>
             <button id="cleanup-btn" class="btn btn-warning">🧹 Cleanup</button>
             <button id="refresh-btn" class="btn btn-primary">🔄 Refresh</button>
-            <button id="new-profile-btn" class="btn btn-success">➕ New Profile</button>
+            <input id="profiles-file-input" type="file" accept=".txt,.csv,.tsv" style="display:none" />
         </div>
         </header>
 
@@ -62,14 +80,23 @@
     <!-- Модальне вікно створення профілю -->
     <div id="new-profile-modal" class="modal">
         <div class="modal-content">
-            <span class="close">&times;</span>
+            <span class="close" id="new-profile-close">&times;</span>
             <h2>Create New Profile</h2>
             <form id="new-profile-form">
                 <input type="text" id="profile-name" placeholder="Profile name" required />
-                <button type="submit" class="btn btn-success">Create</button>
+                <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
+                    <label style="font-size:13px; color:#4a5568;">Assign proxy:</label>
+                    <select id="new-profile-proxy-select" style="padding:6px; border-radius:6px; border:1px solid #e2e8f0;">
+                        <option value="">(no proxy)</option>
+                    </select>
+                    <label style="font-size:13px;"><input type="checkbox" id="new-profile-assign-checkbox" checked /> assign</label>
+                </div>
+                <div style="margin-top:10px; display:flex; gap:8px; justify-content:flex-end;">
+                    <button type="submit" class="btn btn-success">Create</button>
+                </div>
             </form>
-        </div>
-    </div>
+         </div>
+     </div>
 
     <!-- Модальне вікно налаштування проксі -->
     <div id="proxy-modal" class="modal">
@@ -77,18 +104,41 @@
             <span class="close">&times;</span>
             <h2>Configure Proxy</h2>
             <form id="proxy-form">
-                <input type="text" id="proxy-input" placeholder="host:port:username:password" required />
-                <select id="proxy-type">
-                    <option value="http">HTTP</option>
-                    <option value="https">HTTPS</option>
-                    <option value="socks5">SOCKS5</option>
+                <label style="display:block; margin-bottom:6px; font-size:13px; color:#4a5568;">Choose saved proxy or enter custom</label>
+                <select id="proxy-existing-select" style="width:100%; padding:8px; border-radius:6px; border:1px solid #e2e8f0; margin-bottom:8px;">
+                    <option value="">(choose saved proxy)</option>
+                    <option value="custom">-- Custom proxy --</option>
                 </select>
-                <div style="display: flex; gap: 10px;">
+
+                <div id="proxy-custom-block" style="display:none;">
+                    <input type="text" id="proxy-input" placeholder="host:port:username:password" style="width:100%; padding:8px; margin-bottom:8px;" />
+                    <select id="proxy-type" style="width:100%; padding:8px; margin-bottom:8px;">
+                        <option value="http">HTTP</option>
+                        <option value="https">HTTPS</option>
+                        <option value="socks5">SOCKS5</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; gap: 10px; justify-content:flex-end;">
                     <button type="button" id="test-proxy-btn" class="btn btn-warning">🔍 Test Proxy</button>
                     <button type="submit" class="btn btn-success">💾 Save</button>
                 </div>
             </form>
             <div id="proxy-test-result" style="margin-top: 15px; display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Import Preview Modal -->
+    <div id="import-preview-modal" class="modal">
+        <div class="modal-content modal-large">
+            <span class="close">&times;</span>
+            <h2>Import Profiles Preview</h2>
+            <div id="import-preview-count" style="margin-bottom:10px">0 profiles parsed</div>
+            <div style="max-height:400px; overflow:auto;"><table id="import-preview-table" class="import-table" style="width:100%; border-collapse:collapse;"></table></div>
+            <div style="margin-top:15px; display:flex; gap:10px;">
+                <button id="confirm-import-btn" class="btn btn-success">✅ Confirm Import</button>
+                <button id="cancel-import-btn" class="btn btn-secondary">Cancel</button>
+            </div>
         </div>
     </div>
 
@@ -107,7 +157,26 @@
         </div>
     </div>
 
+    <!-- Ephemeral launch modal -->
+    <div id="ephemeral-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Launch Ephemeral Profile (one-time)</h2>
+            <p style="color:#718096;">Ephemeral profile won't be saved to disk. Choose proxy option:</p>
+            <div style="margin:8px 0; display:flex; flex-direction:column; gap:8px;">
+                <label><input type="radio" name="ephemeral-proxy-option" value="none" checked /> No proxy</label>
+                <label><input type="radio" name="ephemeral-proxy-option" value="random" /> Use random saved proxy</label>
+                <label><input type="radio" name="ephemeral-proxy-option" value="choose" /> Choose proxy</label>
+                <select id="ephemeral-proxy-select" style="display:none; padding:8px; border-radius:6px; border:1px solid #e2e8f0;"></select>
+            </div>
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+                <button id="ephemeral-launch-btn" class="btn btn-success">Launch</button>
+                <button id="ephemeral-cancel-btn" class="btn">Cancel</button>
+            </div>
+            <div id="ephemeral-result" style="margin-top:12px; display:none;"></div>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>
-

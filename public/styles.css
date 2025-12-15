@@ -77,6 +77,12 @@ header h1 {
     color: white;
 }
 
+.btn-outline {
+    background: transparent;
+    color: #4a5568;
+    border: 1px solid #e2e8f0;
+}
+
 .stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -397,3 +403,83 @@ header h1 {
     }
 }
 
+.badge {
+    display: inline-block;
+    background: #edf2ff;
+    color: #3730a3;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    margin-left: 8px;
+    font-weight: 700;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    margin-left: 8px;
+    font-weight: 700;
+    color: white;
+}
+
+.status-active {
+    background: #48bb78;
+}
+
+.status-failed {
+    background: #f56565;
+}
+
+.assigned-badge {
+    background: #667eea;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.assigned-list {
+    background: #f8fafc;
+    border-radius: 8px;
+    padding: 8px;
+    margin-top: 6px;
+    border: 1px solid #e2e8f0;
+}
+
+/* Header dropdown */
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+
+.dropdown-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+    padding: 8px;
+    min-width: 180px;
+    z-index: 1100;
+}
+
+.dropdown-menu .item {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+.dropdown-menu .item:hover { background: #f1f5f9; }
+
+.dropdown.open .dropdown-menu { display: block; }
+
+/* small icon in dropdown */
+.dropdown .item .icon { font-size: 16px; margin-right: 8px; }

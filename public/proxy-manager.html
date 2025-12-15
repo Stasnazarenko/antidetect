@@ -185,6 +185,10 @@
                 Format: host:port:username:password:type (one per line)<br>
                 Example: 1.2.3.4:8080:user:pass:http
             </p>
+            <div style="display:flex; gap:8px; margin-bottom:12px; align-items:center;">
+                <input id="import-default-tag" placeholder="Default tag (optional)" style="flex:1; padding:8px; border-radius:6px; border:1px solid #e2e8f0;" />
+                <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#4a5568;"><input type="checkbox" id="import-assign-by-tag" /> Assign to profiles by tag</label>
+            </div>
             <textarea id="import-textarea" rows="15" style="width: 100%; padding: 10px; border: 2px solid #e2e8f0; border-radius: 8px;"></textarea>
             <button id="import-submit-btn" class="btn btn-success" style="margin-top: 10px;">Import</button>
         </div>

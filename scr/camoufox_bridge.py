@@ -432,7 +432,23 @@ class BrowserManager:
                     print(f"Error closing browser: {e}", file=sys.stderr)
 
             # Тільки після закриття видаляємо з self.browsers
+            # capture profile path for possible cleanup
+            profile_path = browser_info.get('profile_path')
             del self.browsers[profile_name]
+
+            # Якщо це ефермерний профіль — видаляємо його папку повністю
+            try:
+                if profile_name.startswith('_ephemeral_') and profile_path:
+                    import shutil
+                    # profile_path may be a Path object or string
+                    pp = profile_path if isinstance(profile_path, str) else str(profile_path)
+                    try:
+                        shutil.rmtree(pp)
+                        print(f"[BRIDGE] Removed ephemeral profile dir: {pp}", file=sys.stderr)
+                    except Exception as e:
+                        print(f"[BRIDGE] Failed to remove ephemeral profile dir {pp}: {e}", file=sys.stderr)
+            except Exception:
+                pass
 
             return {"success": True}
         except Exception as e:

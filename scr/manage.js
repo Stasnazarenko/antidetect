@@ -115,6 +115,121 @@ async function testProxyLocal(proxyObj) {
     }
 }
 
+// Normalize fingerprint object into flat Camoufox launch config
+function normalizeFingerprintForCamoufox(fp) {
+    if (!fp || typeof fp !== 'object') return {};
+
+    const cfg = {};
+
+    // Screen -> window sizes
+    try {
+        if (fp.screen) {
+            // screen can be object with preferred array or min/max
+            if (Array.isArray(fp.screen.preferred) && fp.screen.preferred.length > 0) {
+                const pref = fp.screen.preferred[0];
+                if (Array.isArray(pref) && pref.length >= 2) {
+                    cfg['window.innerWidth'] = pref[0];
+                    cfg['window.innerHeight'] = pref[1];
+                    cfg['window.outerWidth'] = Math.round(pref[0] * 1.02);
+                    cfg['window.outerHeight'] = Math.round(pref[1] * 1.02);
+                } else if (typeof pref === 'string' && pref.includes(',')) {
+                    const parts = pref.split(',').map(x=>parseInt(x,10));
+                    if (parts.length>=2 && parts[0] && parts[1]) {
+                        cfg['window.innerWidth'] = parts[0];
+                        cfg['window.innerHeight'] = parts[1];
+                        cfg['window.outerWidth'] = Math.round(parts[0] * 1.02);
+                        cfg['window.outerHeight'] = Math.round(parts[1] * 1.02);
+                    }
+                } else if (typeof pref === 'object' && pref[0] && pref[1]) {
+                    cfg['window.innerWidth'] = pref[0];
+                    cfg['window.innerHeight'] = pref[1];
+                    cfg['window.outerWidth'] = Math.round(pref[0] * 1.02);
+                    cfg['window.outerHeight'] = Math.round(pref[1] * 1.02);
+                }
+            } else if (fp.screen.minWidth && fp.screen.minHeight) {
+                cfg['window.innerWidth'] = fp.screen.minWidth;
+                cfg['window.innerHeight'] = fp.screen.minHeight;
+                cfg['window.outerWidth'] = fp.screen.maxWidth || Math.round(fp.screen.minWidth * 1.02);
+                cfg['window.outerHeight'] = fp.screen.maxHeight || Math.round(fp.screen.minHeight * 1.02);
+            }
+        }
+    } catch (e) {
+        // ignore
+    }
+
+    // history length
+    if (fp['window'] && typeof fp.window === 'object') {
+        if (fp.window.history && typeof fp.window.history.length === 'number') cfg['window.history.length'] = fp.window.history.length;
+    }
+    if (fp['window.history.length']) cfg['window.history.length'] = fp['window.history.length'];
+
+    // Navigator fields
+    try {
+        if (fp.navigator) {
+            if (fp.navigator.userAgent) cfg['navigator.userAgent'] = fp.navigator.userAgent;
+            if (fp.navigator.appCodeName) cfg['navigator.appCodeName'] = fp.navigator.appCodeName;
+            if (fp.navigator.appName) cfg['navigator.appName'] = fp.navigator.appName;
+            if (fp.navigator.appVersion) cfg['navigator.appVersion'] = fp.navigator.appVersion;
+            if (fp.navigator.oscpu) cfg['navigator.oscpu'] = fp.navigator.oscpu;
+            if (fp.navigator.language) cfg['navigator.language'] = fp.navigator.language;
+            if (fp.navigator.languages) cfg['navigator.languages'] = fp.navigator.languages;
+            if (fp.navigator.platform) cfg['navigator.platform'] = fp.navigator.platform;
+            if (fp.navigator.hardwareConcurrency && typeof fp.navigator.hardwareConcurrency === 'number') cfg['navigator.hardwareConcurrency'] = fp.navigator.hardwareConcurrency;
+            if (fp.navigator.maxTouchPoints !== undefined) cfg['navigator.maxTouchPoints'] = fp.navigator.maxTouchPoints;
+            if (fp.navigator.product) cfg['navigator.product'] = fp.navigator.product;
+            if (fp.navigator.productSub) cfg['navigator.productSub'] = fp.navigator.productSub;
+        } else {
+            if (fp['navigator.userAgent']) cfg['navigator.userAgent'] = fp['navigator.userAgent'];
+            if (fp['navigator.language']) cfg['navigator.language'] = fp['navigator.language'];
+            if (fp['navigator.platform']) cfg['navigator.platform'] = fp['navigator.platform'];
+            if (fp['navigator.hardwareConcurrency'] && typeof fp['navigator.hardwareConcurrency'] === 'number') cfg['navigator.hardwareConcurrency'] = fp['navigator.hardwareConcurrency'];
+        }
+    } catch (e) {}
+
+    // top-level shortcuts
+    if (!cfg['navigator.userAgent'] && fp['userAgent']) cfg['navigator.userAgent'] = fp['userAgent'];
+
+    // headless/humanize flags
+    if (fp.headless) cfg['headless'] = fp.headless;
+    if (fp.block_images !== undefined) cfg['block_images'] = fp.block_images;
+    if (fp.block_media !== undefined) cfg['block_media'] = fp.block_media;
+
+    // os -> pass through as top-level os if present
+    if (fp.os) cfg['os'] = fp.os;
+
+    // Convert hardwareConcurrency object to a number if provided
+    try {
+        const hc = fp.hardwareConcurrency || (fp.navigator && fp.navigator.hardwareConcurrency);
+        if (hc && typeof hc === 'object') {
+            // prefer 'min', fall back to avg of min/max
+            if (hc.min && typeof hc.min === 'number') cfg['navigator.hardwareConcurrency'] = hc.min;
+            else if (hc.min && typeof hc.min === 'string' && !isNaN(parseInt(hc.min,10))) cfg['navigator.hardwareConcurrency'] = parseInt(hc.min,10);
+            else if (hc.max && typeof hc.max === 'number') cfg['navigator.hardwareConcurrency'] = Math.min(8, hc.max);
+        }
+    } catch (e) {}
+
+    // Ensure we do NOT pass nested/unsupported fields which Camoufox will reject
+    // Remove any obvious problematic props
+    delete cfg['osVersion'];
+    delete cfg['screen'];
+    delete cfg['hardwareConcurrency'];
+
+    // Finally, return only whitelisted keys for safety (small whitelist)
+    const allowed = [
+        'window.innerWidth','window.innerHeight','window.outerWidth','window.outerHeight','window.history.length',
+        'navigator.userAgent','navigator.appCodeName','navigator.appName','navigator.appVersion','navigator.oscpu',
+        'navigator.language','navigator.languages','navigator.platform','navigator.hardwareConcurrency','navigator.maxTouchPoints',
+        'navigator.product','navigator.productSub','headless','block_images','block_media','os'
+    ];
+
+    const out = {};
+    for (const k of Object.keys(cfg)) {
+        if (allowed.includes(k)) out[k] = cfg[k];
+    }
+
+    return out;
+}
+
 // Launch profile using Python bridge
 async function launch_Profile(name) {
     console.log(timeLog() + `Launching Camoufox for profile ${name}...`);
@@ -164,6 +279,9 @@ async function launch_Profile(name) {
                         throw err;
                     }
                 }
+
+    // Normalize fingerprint for Camoufox
+    command.config.fingerprint = normalizeFingerprintForCamoufox(command.config.fingerprint);
 
     // Send command to bridge
     bridge.stdin.write(JSON.stringify(command) + '\n');
@@ -372,6 +490,10 @@ async function set_ProfileProxy(name, proxy) {
     if (typeof proxy === 'object') {
         // If already normalized object, ensure server has no scheme
         const obj = { ...proxy };
+        // If object has host/port fields but no server, build server
+        if (!obj.server && obj.host && obj.port) {
+            obj.server = `${obj.host}:${obj.port}`;
+        }
         if (obj.server && typeof obj.server === 'string') {
             obj.server = obj.server.replace(/^(https?:\/\/|socks5?:\/\/)*/i, '');
         }
@@ -555,6 +677,9 @@ async function launch_Ephemeral(options = {}) {
         }
     }
 
+    // Normalize fingerprint for Camoufox
+    command.config.fingerprint = normalizeFingerprintForCamoufox(command.config.fingerprint);
+
     // Send command to bridge
     bridge.stdin.write(JSON.stringify(command) + '\n');
 
@@ -580,4 +705,4 @@ async function launch_Ephemeral(options = {}) {
     });
 }
 
-export { create_Profile, open_Profile, close_Profile, active, set_ProfileProxy, launch_Ephemeral };
+export { create_Profile, open_Profile, close_Profile, active, set_ProfileProxy, launch_Ephemeral, delete_Profile, delete_ProfileProxy, change_ProfileFP, delete_ProfileFP, rename_Profile, cleanup_DeadBrowsers };

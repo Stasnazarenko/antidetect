@@ -26,8 +26,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ==================== API ENDPOINTS ====================
 // Динамічно імпортуємо manage для ESM
+// Import manage module and ensure it's loaded before handling requests
 let manage;
-(async () => { manage = await import('./scr/manage.js'); })();
+try {
+    // top-level await is supported in ESM; this ensures manage is ready
+    manage = await import('./scr/manage.js');
+} catch (e) {
+    console.error('Failed to import manage module at startup:', e);
+    // rethrow so process exits rather than serving partial API
+    throw e;
+}
 
 // Отримати список профілів
 app.get('/api/profiles', async (req, res) => {
@@ -49,6 +57,15 @@ app.get('/api/profiles', async (req, res) => {
 
             // Resolve proxy info from global proxies list if possible
             let rawProxy = pdata.get('proxy') || false;
+            // Normalize if malformed (server field may be object)
+            try {
+                if (rawProxy && typeof rawProxy === 'object' && rawProxy.server && typeof rawProxy.server === 'object') {
+                    const s = rawProxy.server;
+                    if (s.host && s.port) rawProxy.server = `${s.host}:${s.port}`;
+                    else if (s.hostname && s.port) rawProxy.server = `${s.hostname}:${s.port}`;
+                    else rawProxy.server = String(s);
+                }
+            } catch (e) {}
             let proxyInfo = null;
             try {
                 if (rawProxy) {
@@ -95,12 +112,33 @@ app.get('/api/profiles', async (req, res) => {
 // Створити профіль
 app.post('/api/profiles', async (req, res) => {
     try {
-        const { name } = req.body;
+        const { name, proxyId, proxy } = req.body || {};
         if (!name) {
             return res.status(400).json({ success: false, error: 'Profile name required' });
         }
 
         await manage.create_Profile(name);
+
+        // If proxyId provided, resolve and assign
+        if (proxyId) {
+            const list = readProxiesFile();
+            const found = list.find(p => p.id === String(proxyId));
+            if (found) {
+                // assign in storage
+                found.assignedTo = Array.isArray(found.assignedTo) ? found.assignedTo : [];
+                if (!found.assignedTo.includes(name)) found.assignedTo.push(name);
+                writeProxiesFile(list);
+                // call manage to set proxy (accepts object)
+                await manage.set_ProfileProxy(name, Object.assign({}, found));
+            }
+        } else if (proxy) {
+            try {
+                await manage.set_ProfileProxy(name, proxy);
+            } catch (e) {
+                console.error('Failed to set proxy on create:', e.message || e);
+            }
+        }
+
         io.emit('profile_created', { name });
 
         res.json({ success: true, profile: name });
@@ -321,7 +359,7 @@ app.post('/api/proxies/:id/test', async (req, res) => {
         const proxyObj = Object.assign({}, proxy);
         console.log(`[API] Testing proxy id=${id} rawObject=`, proxyObj);
         const result = await testProxy(proxyObj);
-        // save test result and status back to proxies.json
+        // save test result and status to proxies.json
         try {
             proxy.testResult = result.success ? result : { error: result.error };
             proxy.status = result.success ? 'active' : 'failed';
@@ -631,6 +669,29 @@ app.post('/api/profiles/ephemeral', async (req, res) => {
     }
 });
 
+// Test ephemeral proxy without launching browser
+app.post('/api/profiles/ephemeral/test', async (req, res) => {
+    try {
+        const { proxyId, proxy } = req.body || {};
+        let proxyObj = null;
+        if (proxyId) {
+            const list = readProxiesFile();
+            const found = list.find(p => p.id === proxyId);
+            if (!found) return res.status(404).json({ success: false, error: 'Proxy not found' });
+            proxyObj = found;
+        } else if (proxy) {
+            proxyObj = proxy;
+        } else {
+            return res.status(400).json({ success: false, error: 'proxyId or proxy required' });
+        }
+
+        const result = await testProxy(proxyObj);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, error: String(error.message || error) });
+    }
+});
+
 // WebSocket з'єднання
 io.on('connection', (socket) => {
     console.log('Client connected:', socket.id);
@@ -644,7 +705,7 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
     console.log(`
-╔════════════════════════════════════════╗
+╔═══════════════════════════════���════════╗
 ║   Antidetect Browser Manager UI       ║
 ║                                        ║
 ║   Server running on:                  ║
@@ -654,4 +715,60 @@ httpServer.listen(PORT, () => {
 ║   http://localhost:${PORT}/api/profiles║
 ╚════════════════════════════════════════╝
     `);
+});
+
+// Bulk import profiles (JSON payload: { profiles: [ { name, proxyId, proxy, proxyType } ] })
+app.post('/api/profiles/import', async (req, res) => {
+    try {
+        const { profiles } = req.body || {};
+        if (!Array.isArray(profiles)) return res.status(400).json({ success: false, error: 'profiles array required' });
+
+        const results = [];
+        for (const item of profiles) {
+            const name = item.name || (item.profileName || item.profile || '').toString();
+            if (!name) {
+                results.push({ success: false, error: 'missing name', item });
+                continue;
+            }
+            try {
+                // create profile (generate fingerprint inside)
+                await manage.create_Profile(name, { proxy: false });
+
+                // assign proxy if provided
+                if (item.proxyId) {
+                    try {
+                        // resolve proxyId to full object from storage
+                        const list = readProxiesFile();
+                        const found = list.find(p => p.id === String(item.proxyId));
+                        if (found) {
+                            await manage.set_ProfileProxy(name, Object.assign({}, found));
+                        } else {
+                            // try to find by numeric-like id
+                            const found2 = list.find(p => p.id && p.id.indexOf(String(item.proxyId)) !== -1);
+                            if (found2) await manage.set_ProfileProxy(name, Object.assign({}, found2));
+                            else console.error('Import: proxyId not found in storage for', name, item.proxyId);
+                        }
+                    } catch (e) {
+                        console.error('Failed to set proxy by id for', name, e.message);
+                    }
+                } else if (item.proxy) {
+                    try {
+                        await manage.set_ProfileProxy(name, item.proxy);
+                    } catch (e) {
+                        console.error('Failed to set proxy string for', name, e.message);
+                    }
+                }
+
+                results.push({ success: true, name });
+            } catch (err) {
+                console.error('Import profile error for', name, err.message || err);
+                results.push({ success: false, name, error: err.message || String(err) });
+            }
+        }
+
+        io.emit('profiles_imported');
+        res.json({ success: true, results });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
