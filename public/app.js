@@ -34,11 +34,29 @@ let bulkActionsDiv = null;
 // Safe modal helpers
 function showModal(id) {
     const el = getEl(id);
-    if (el) el.style.display = 'block';
+    if (el) {
+        // Make modal visible and interactive
+        el.style.display = 'block';
+        el.style.pointerEvents = 'auto';
+        // ensure modal-content also accepts pointer events
+        const content = el.querySelector('.modal-content');
+        if (content) content.style.pointerEvents = 'auto';
+        // autofocus first input in modal to improve UX
+        try {
+            const firstInput = el.querySelector('input, button, select, textarea');
+            if (firstInput && typeof firstInput.focus === 'function') {
+                setTimeout(() => { try { firstInput.focus(); } catch (e) {} }, 50);
+            }
+        } catch (e) { /* ignore */ }
+    }
 }
 function hideModal(id) {
     const el = getEl(id);
-    if (el) el.style.display = 'none';
+    if (el) {
+        el.style.display = 'none';
+        el.style.pointerEvents = 'none';
+        const content = el.querySelector('.modal-content'); if (content) content.style.pointerEvents = 'none';
+    }
 }
 
 // Ensure commonly used modal elements exist as variables for older code compatibility
@@ -575,11 +593,6 @@ const newProfileProxySelectSafe = getEl('new-profile-proxy-select');
 const newProfileAssignCheckboxSafe = getEl('new-profile-assign-checkbox');
 
 // New profile button and form (safe)
-safeOn('new-profile-btn', 'click', async () => {
-    await loadProxiesIntoSelect(getEl('new-profile-proxy-select'));
-    const nm = getEl('new-profile-modal'); if (nm) nm.style.display = 'block';
-});
-
 safeOn('new-profile-close', 'click', () => { const nm = getEl('new-profile-modal'); if (nm) nm.style.display = 'none'; });
 
 safeOn('new-profile-form', 'submit', async (e) => {
@@ -599,14 +612,30 @@ safeOn('new-profile-form', 'submit', async (e) => {
         const data = await resp.json();
         if (data && data.success) {
             showNotification('Profile created successfully', 'success');
+
+            // Immediately add a local placeholder so the UI reflects the new profile without a full reload
+            try {
+                const exists = profiles.find(p => p.name === name);
+                if (!exists) {
+                    profiles.unshift({ name: name, open: false, proxy: false, proxyType: 'http', fingerprint: false, proxyInfo: null });
+                    updateStats();
+                    renderProfiles();
+                }
+            } catch (e) { console.warn('Immediate local insert failed', e); }
+
             // close the new-profile modal explicitly and any overlays
             closeAllModals();
             closeAllDropdowns();
             restoreHeaderInteraction();
-            // small timeout to allow UI update then reload profiles
-            setTimeout(async () => { if (nameEl) nameEl.value = ''; await loadProfiles(); }, 200);
+
+            // re-sync with server after a short delay to pick up canonical data
+            setTimeout(async () => {
+                if (nameEl) nameEl.value = '';
+                await loadProfiles();
+                try { renderProfiles(); } catch(e) {}
+            }, 900);
         } else {
-            showNotification(data.error || 'Failed to create profile', 'error');
+            showNotification(data && (data.error || data.message) ? (data.error || data.message) : 'Failed to create profile', 'error');
             console.debug('[app.js] create profile response', data);
         }
     } catch (err) {
@@ -646,6 +675,7 @@ safeOn('advanced-dropdown-btn', 'click', (e) => {
 });
 
 // Ensure new-profile submit closes modals and dropdowns reliably on success
+// (Single handler - handles create, closes modals, reloads profiles)
 safeOn('new-profile-form', 'submit', async (e) => {
     e.preventDefault();
     const nameEl = getEl('profile-name');
@@ -666,8 +696,12 @@ safeOn('new-profile-form', 'submit', async (e) => {
             closeAllModals();
             closeAllDropdowns();
             restoreHeaderInteraction();
-            // small timeout to allow UI update then reload profiles
-            setTimeout(async () => { if (nameEl) nameEl.value = ''; await loadProfiles(); }, 200);
+            // give server/DB more time then reload profiles and render
+            setTimeout(async () => {
+                if (nameEl) nameEl.value = '';
+                await loadProfiles();
+                try { renderProfiles(); } catch(e) {}
+            }, 900);
         } else {
             showNotification(data.error || 'Failed to create profile', 'error');
             console.debug('[app.js] create profile response', data);
@@ -844,8 +878,9 @@ function initApp() {
                             console.info('[UI] Attempting to hide blocking modal:', modal);
                             try {
                                 modal.style.display = 'none';
-                                // also remove any inline overlay opacity/pointer events
+                                // also remove any inline overlay opacity/pointer events and mark for restoration
                                 modal.style.pointerEvents = 'none';
+                                modal.setAttribute('data-temp-disabled', 'true');
                                 // give header priority
                                 headerEl.style.zIndex = '1000000';
                                 headerEl.style.pointerEvents = 'auto';
@@ -863,6 +898,8 @@ function initApp() {
                             if (z > 0) {
                                 console.info('[UI] Temporarily disabling pointer-events on blocking element to recover header clicks');
                                 topEl.style.pointerEvents = 'none';
+                                // mark for restore later
+                                try { topEl.setAttribute('data-temp-disabled','true'); } catch(e){}
                                 // ensure header receives clicks
                                 headerEl.style.zIndex = '1000000';
                                 headerEl.style.pointerEvents = 'auto';
@@ -1050,6 +1087,7 @@ document.addEventListener('click', function captureHeaderClicks(e) {
                     console.debug('[app.js] capture: hiding blocking modal to allow header click', modal);
                     modal.style.display = 'none';
                     modal.style.pointerEvents = 'none';
+                    modal.setAttribute('data-temp-disabled','true');
                     // prevent the original event from propagating further (we handled overlay)
                     e.stopPropagation();
                     e.preventDefault();
@@ -1062,6 +1100,7 @@ document.addEventListener('click', function captureHeaderClicks(e) {
                     if (z > 1000) {
                         console.debug('[app.js] capture: disabling pointer-events on blocking element', topEl);
                         topEl.style.pointerEvents = 'none';
+                        try { topEl.setAttribute('data-temp-disabled','true'); } catch(e){}
                         header.style.zIndex = '1000000';
                         header.style.pointerEvents = 'auto';
                         // prevent original click from acting on the overlay
