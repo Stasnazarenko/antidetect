@@ -1,0 +1,10 @@
+name,proxy,type,tags,fingerprint
+MyProfile1,,auto,
+MyProfile2,89.33.245.223:5613:qwjlbxbv:9m68eo16v9qi,http,ads1,{"os":"macos","window.innerWidth":1440}
+
+# Notes:
+# - 'proxy' field format: host:port[:username:password]
+# - 'type' can be http, https, socks5 or 'auto'
+# - 'tags' is comma-separated tags
+# - 'fingerprint' optionally can be a JSON object (escaped) representing fingerprint overrides
+
