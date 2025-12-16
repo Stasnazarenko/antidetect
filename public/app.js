@@ -674,44 +674,6 @@ safeOn('advanced-dropdown-btn', 'click', (e) => {
     console.debug('[app.js] open dropdowns:', Array.from(document.querySelectorAll('.dropdown.open')).map(d=>d.id));
 });
 
-// Ensure new-profile submit closes modals and dropdowns reliably on success
-// (Single handler - handles create, closes modals, reloads profiles)
-safeOn('new-profile-form', 'submit', async (e) => {
-    e.preventDefault();
-    const nameEl = getEl('profile-name');
-    const name = nameEl ? nameEl.value.trim() : '';
-    if (!name) { showNotification('Profile name required', 'error'); return; }
-
-    const proxyId = (getEl('new-profile-assign-checkbox') && getEl('new-profile-assign-checkbox').checked) ? (getEl('new-profile-proxy-select') ? getEl('new-profile-proxy-select').value : null) : null;
-
-    try {
-        const body = proxyId ? { name, proxyId } : { name };
-        const resp = await fetch('/api/profiles', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-        });
-        const data = await resp.json();
-        if (data && data.success) {
-            showNotification('Profile created successfully', 'success');
-            // close the new-profile modal explicitly and any overlays
-            closeAllModals();
-            closeAllDropdowns();
-            restoreHeaderInteraction();
-            // give server/DB more time then reload profiles and render
-            setTimeout(async () => {
-                if (nameEl) nameEl.value = '';
-                await loadProfiles();
-                try { renderProfiles(); } catch(e) {}
-            }, 900);
-        } else {
-            showNotification(data.error || 'Failed to create profile', 'error');
-            console.debug('[app.js] create profile response', data);
-        }
-    } catch (err) {
-        console.error('Create profile error', err);
-        showNotification('Failed to create profile', 'error');
-    }
-});
-
 // Dropdown helpers: close all dropdowns and toggle
 function closeAllDropdowns() {
     const dds = document.querySelectorAll('.dropdown');
@@ -738,7 +700,6 @@ function closeAllDropdowns() {
 
 // Ensure dropdowns close after selecting an item
 safeOn('menu-new-profile', 'click', async (e) => {
-    // existing handler logic runs (attached earlier), just close dropdown
     const dd = getEl('create-dropdown'); if (dd) dd.classList.remove('open');
 });
 safeOn('menu-ephemeral', 'click', async (e) => {
