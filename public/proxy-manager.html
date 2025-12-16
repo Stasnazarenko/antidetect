@@ -7,12 +7,15 @@
     <link rel="stylesheet" href="styles.css">
     <script src="/socket.io/socket.io.js"></script>
     <style>
+        /* Proxy Manager - theme-aware styles (use root CSS variables) */
         .proxy-card {
-            background: white;
-            border-radius: 12px;
-            padding: 20px;
+            background: linear-gradient(180deg, var(--bg-card), var(--bg-soft));
+            color: var(--card-text);
+            border-radius: var(--radius-lg);
+            padding: 18px;
             margin-bottom: 15px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border: 1px solid var(--border-soft);
+            box-shadow: 0 8px 20px rgba(2,6,23,0.5);
         }
 
         .proxy-header {
@@ -23,51 +26,46 @@
         }
 
         .proxy-status {
-            padding: 5px 10px;
-            border-radius: 20px;
+            padding: 6px 10px;
+            border-radius: 999px;
             font-size: 12px;
-            font-weight: 600;
+            font-weight: 700;
         }
 
-        .status-active { background: #c6f6d5; color: #22543d; }
-        .status-inactive { background: #e2e8f0; color: #4a5568; }
-        .status-testing { background: #fef3c7; color: #92400e; }
-        .status-failed { background: #fed7d7; color: #742a2a; }
+        .status-active { background: rgba(34,197,94,0.12); color: var(--success); }
+        .status-inactive { background: rgba(255,255,255,0.02); color: var(--card-muted); }
+        .status-testing { background: rgba(250,204,21,0.12); color: #f59e0b; }
+        .status-failed { background: rgba(239,68,68,0.12); color: var(--danger); }
 
         .proxy-tags {
             display: flex;
             flex-wrap: wrap;
-            gap: 5px;
+            gap: 6px;
             margin: 10px 0;
         }
 
         .tag {
-            background: #667eea;
+            background: linear-gradient(135deg,var(--accent),var(--accent-2));
             color: white;
-            padding: 4px 10px;
-            border-radius: 15px;
+            padding: 6px 10px;
+            border-radius: 999px;
             font-size: 12px;
             display: inline-flex;
             align-items: center;
-            gap: 5px;
+            gap: 8px;
         }
 
-        .tag .remove {
-            cursor: pointer;
-            font-weight: bold;
-        }
+        .tag .remove { cursor: pointer; font-weight: 700; }
 
-        .proxy-info {
-            font-size: 13px;
-            color: #718096;
-            margin-top: 10px;
-        }
+        .proxy-info { font-size: 13px; color: var(--card-muted); margin-top: 10px; }
 
-        .proxy-actions {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-        }
+        .proxy-actions { display: flex; gap: 10px; margin-top: 14px; }
+
+        .assigned-badge { background: rgba(255,255,255,0.03); color: var(--card-text); padding: 6px 8px; border-radius: 12px; font-weight:700 }
+
+        /* ensure inputs inside modal inherit theme */
+        .modal input, .modal select, .modal textarea { background: var(--bg-soft); color: var(--card-text); border: 1px solid var(--border-soft); }
+
     </style>
 </head>
 <body>
@@ -75,6 +73,7 @@
         <header>
             <h1>🌐 Proxy Manager</h1>
             <div class="header-actions">
+                <div class="theme-toggle" id="themeToggle" title="Toggle theme"></div>
                 <button id="import-proxies-btn" class="btn btn-primary">📥 Import Proxies</button>
                 <button id="new-proxy-btn" class="btn btn-success">➕ Add Proxy</button>
                 <button onclick="window.location.href='/'" class="btn btn-secondary">← Back to Profiles</button>
@@ -194,6 +193,7 @@
         </div>
     </div>
 
+    <script src="theme.js"></script>
     <script src="proxy-manager.js"></script>
 </body>
 </html>

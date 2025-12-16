@@ -9,6 +9,22 @@ let profilesList = [];
 function getEl(id) { return document.getElementById(id) || null; }
 function safeOn(id, event, handler) { const el = getEl(id); if (el) el.addEventListener(event, handler); }
 
+// Modal helpers to ensure modals are displayed centered (use display:flex)
+function showModal(idOrEl) {
+    const el = (typeof idOrEl === 'string') ? getEl(idOrEl) : idOrEl;
+    if (!el) return;
+    el.style.display = 'flex';
+    el.style.alignItems = 'center';
+    el.style.justifyContent = 'center';
+    el.style.pointerEvents = 'auto';
+}
+function hideModal(idOrEl) {
+    const el = (typeof idOrEl === 'string') ? getEl(idOrEl) : idOrEl;
+    if (!el) return;
+    el.style.display = 'none';
+    el.style.pointerEvents = 'none';
+}
+
 // IPC API for Electron
 const { ipcRenderer } = window;
 
@@ -197,7 +213,7 @@ function renderProxies() {
 function toggleAssignedList(proxyId) {
     const el = document.getElementById(`assigned-list-${proxyId}`);
     if (!el) return;
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
 }
 
 // Refresh both proxies and profiles
@@ -287,7 +303,7 @@ safeOn('new-proxy-form', 'submit', async (e) => {
         renderProxies();
         updateStats();
 
-        const newProxyModal = getEl('new-proxy-modal'); if (newProxyModal) newProxyModal.style.display = 'none';
+        const newProxyModal = getEl('new-proxy-modal'); if (newProxyModal) hideModal(newProxyModal);
         const newProxyForm = getEl('new-proxy-form'); if (newProxyForm) newProxyForm.reset();
 
         showNotification('Proxy added successfully', 'success');
@@ -370,38 +386,38 @@ async function openAssignModal(proxyId) {
     } catch (e) {
         select.innerHTML = '<option value="">Error loading profiles</option>';
     }
-    const assignModal = getEl('assign-proxy-modal'); if (assignModal) assignModal.style.display = 'block';
-}
+    const assignModal = getEl('assign-proxy-modal'); if (assignModal) showModal(assignModal);
 
-document.getElementById('assign-profile-cancel').addEventListener('click', () => {
-    document.getElementById('assign-proxy-modal').style.display = 'none';
-    pendingAssignProxyId = null;
-});
+    document.getElementById('assign-profile-cancel').addEventListener('click', () => {
+        hideModal('assign-proxy-modal');
+        pendingAssignProxyId = null;
+    });
 
-document.getElementById('assign-profile-save').addEventListener('click', async () => {
-    const sel = getEl('assign-profile-select');
-    const profileName = sel.value;
-    if (!profileName || !pendingAssignProxyId) return;
-    try {
-        const resp = await fetch(`/api/profiles/${encodeURIComponent(profileName)}/proxy`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxyId: pendingAssignProxyId })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            // refresh proxies list
-            proxies = await fetchProxies();
-            renderProxies();
-            updateStats();
-            document.getElementById('assign-proxy-modal').style.display = 'none';
-            pendingAssignProxyId = null;
-            showNotification('Proxy assigned', 'success');
-        } else {
-            showNotification(data.error || 'Assign failed', 'error');
+    document.getElementById('assign-profile-save').addEventListener('click', async () => {
+        const sel = getEl('assign-profile-select');
+        const profileName = sel.value;
+        if (!profileName || !pendingAssignProxyId) return;
+        try {
+            const resp = await fetch(`/api/profiles/${encodeURIComponent(profileName)}/proxy`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proxyId: pendingAssignProxyId })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                // refresh proxies list
+                proxies = await fetchProxies();
+                renderProxies();
+                updateStats();
+                hideModal('assign-proxy-modal');
+                pendingAssignProxyId = null;
+                showNotification('Proxy assigned', 'success');
+            } else {
+                showNotification(data.error || 'Assign failed', 'error');
+            }
+        } catch (e) {
+            showNotification('Assign failed', 'error');
         }
-    } catch (e) {
-        showNotification('Assign failed', 'error');
-    }
-});
+    });
+}
 
 // Додати тег
 function addTag(proxyId) {
@@ -476,7 +492,7 @@ function editProxy(id) {
     const userEl = getEl('edit-proxy-username'); if (userEl) userEl.value = proxy.username || '';
     const passEl = getEl('edit-proxy-password'); if (passEl) passEl.value = proxy.password || '';
     const typeEl = getEl('edit-proxy-type'); if (typeEl) typeEl.value = proxy.type || 'http';
-    const editModal = getEl('edit-proxy-modal'); if (editModal) editModal.style.display = 'block';
+    const editModal = getEl('edit-proxy-modal'); if (editModal) showModal(editModal);
 
     const form = getEl('edit-proxy-form');
     if (!form) return;
@@ -510,7 +526,7 @@ function editProxy(id) {
             renderProxies();
             updateStats();
             showNotification('Proxy updated', 'success');
-            const editModal2 = getEl('edit-proxy-modal'); if (editModal2) editModal2.style.display = 'none';
+            const editModal2 = getEl('edit-proxy-modal'); if (editModal2) hideModal(editModal2);
             form.removeEventListener('submit', handler);
         } catch (err) {
             showNotification('Failed to update proxy', 'error');
@@ -531,14 +547,28 @@ const importDefaultTag = document.getElementById('import-default-tag');
 const importAssignByTag = document.getElementById('import-assign-by-tag');
 
 const importProxiesBtn = document.getElementById('import-proxies-btn');
-if (importProxiesBtn) importProxiesBtn.addEventListener('click', () => importModal.style.display = 'block');
+if (importProxiesBtn) importProxiesBtn.addEventListener('click', () => showModal(importModal));
 
 function parseProxyLine(line) {
     if (!line || !line.trim()) return null;
     let s = line.trim();
+    // ignore comments
+    if (s.startsWith('#')) return null;
+    // ignore lines that look like CSV header (contain host and port keywords)
+    const lower = s.toLowerCase();
+    if (lower.includes('host') && lower.includes('port')) return null;
+
     // remove surrounding quotes
     if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) s = s.slice(1, -1);
-    // Try to parse user:pass@host:port or host:port:username:password:type
+
+    // replace common separators (commas, semicolons) with colon when appropriate
+    if (s.includes(',') && !s.includes(':')) s = s.replace(/\s*,\s*/g, ':');
+    if (s.includes(';') && !s.includes(':')) s = s.replace(/\s*;\s*/g, ':');
+
+    // If string starts with a scheme (http:// etc) remove it
+    s = s.replace(/^(https?:\/\/|socks5?:\/\/)/i, '');
+
+    // If contains '@' -> auth@host:port
     if (s.includes('@')) {
         const [auth, hostPart] = s.split('@');
         const [user, pass] = auth.split(':');
@@ -549,7 +579,9 @@ function parseProxyLine(line) {
         return { host, port, username: user || '', password: pass || '', type: 'http' };
     }
 
+    // split by colon
     const parts = s.split(':');
+    // host:port
     if (parts.length >= 2) {
         const host = parts[0];
         const port = parts[1] || '';
@@ -558,12 +590,16 @@ function parseProxyLine(line) {
         const type = parts[4] || 'http';
         return { host, port, username, password, type };
     }
+
     return null;
 }
 
 async function importProxiesFromTextarea() {
     const raw = importTextarea.value || '';
-    const lines = raw.replace(/\r\n/g,'\n').split('\n').map(l=>l.trim()).filter(Boolean);
+    // normalize line endings, split, trim
+    const linesAll = raw.replace(/\r\n/g,'\n').split('\n').map(l=>l.trim());
+    // drop commented and empty and header-like lines
+    const lines = linesAll.filter(l => l && !l.startsWith('#') && !(l.toLowerCase().includes('host') && l.toLowerCase().includes('port')));
     if (lines.length === 0) { showNotification('No proxies to import', 'error'); return; }
 
     const parsed = lines.map(parseProxyLine).filter(Boolean);
@@ -576,7 +612,6 @@ async function importProxiesFromTextarea() {
     importSubmitBtn.textContent = 'Importing...';
 
     const defaultTag = (importDefaultTag && importDefaultTag.value) ? importDefaultTag.value.trim() : null;
-    const assignByTag = importAssignByTag && importAssignByTag.checked;
 
     let success = 0;
     for (const p of parsed) {
@@ -586,9 +621,13 @@ async function importProxiesFromTextarea() {
                 port: String(p.port || ''),
                 username: p.username || '',
                 password: p.password || '',
-                type: p.type || 'http',
-                tags: defaultTag ? [defaultTag] : []
+                type: (p.type || 'http').toLowerCase(),
+                tags: defaultTag ? [defaultTag] : [],
+                status: 'inactive',
+                testResult: null,
+                createdAt: new Date().toISOString()
             };
+
             const resp = await fetch('/api/proxies', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(obj)
             });
@@ -607,15 +646,11 @@ async function importProxiesFromTextarea() {
     importSubmitBtn.textContent = 'Import';
 
     showNotification(`Imported ${success}/${parsed.length} proxies`, success>0 ? 'success' : 'error');
-    importModal.style.display = 'none';
+    hideModal(importModal);
     // refresh proxy list
     try { proxies = await fetchProxies(); renderProxies(); updateStats(); } catch (e) {}
 }
 
-importSubmitBtn.addEventListener('click', importProxiesFromTextarea);
-
-// close import modal
-importModal.querySelector('.close').addEventListener('click', () => importModal.style.display = 'none');
 
 // --- DOM initialization moved into initProxyManagerPage to avoid null element errors ---
 async function initProxyManagerPage() {
@@ -647,14 +682,12 @@ async function initProxyManagerPage() {
     // Setup UI buttons (guard if elements missing)
     const newProxyBtn = document.getElementById('new-proxy-btn');
     if (newProxyBtn) newProxyBtn.addEventListener('click', () => {
-        const modal = document.getElementById('new-proxy-modal');
-        if (modal) modal.style.display = 'block';
+        const modal = document.getElementById('new-proxy-modal'); if (modal) showModal(modal);
     });
 
     const importProxiesBtn = document.getElementById('import-proxies-btn');
     if (importProxiesBtn) importProxiesBtn.addEventListener('click', () => {
-        const modal = document.getElementById('import-modal');
-        if (modal) modal.style.display = 'block';
+        const modal = document.getElementById('import-modal'); if (modal) showModal(modal);
     });
 
     const searchEl = document.getElementById('search-proxy');
@@ -673,14 +706,13 @@ async function initProxyManagerPage() {
         importSubmitBtnEl.addEventListener('click', importProxiesFromTextarea);
         // close import modal
         const closeBtn = importModalEl.querySelector('.close');
-        if (closeBtn) closeBtn.addEventListener('click', () => { importModalEl.style.display = 'none'; });
+        if (closeBtn) closeBtn.addEventListener('click', () => { hideModal(importModalEl); });
     }
 
     // Assign modal actions
     const assignCancel = document.getElementById('assign-profile-cancel');
     if (assignCancel) assignCancel.addEventListener('click', () => {
-        const modal = document.getElementById('assign-proxy-modal');
-        if (modal) modal.style.display = 'none';
+        const modal = document.getElementById('assign-proxy-modal'); if (modal) hideModal(modal);
         pendingAssignProxyId = null;
     });
     const assignSave = document.getElementById('assign-profile-save');
@@ -697,7 +729,7 @@ async function initProxyManagerPage() {
                 proxies = await fetchProxies();
                 renderProxies();
                 updateStats();
-                const modal = document.getElementById('assign-proxy-modal'); if (modal) modal.style.display = 'none';
+                const modal = document.getElementById('assign-proxy-modal'); if (modal) hideModal(modal);
                 pendingAssignProxyId = null;
                 showNotification('Proxy assigned', 'success');
             } else {
@@ -711,13 +743,13 @@ async function initProxyManagerPage() {
     // Modal close handlers (generic)
     document.querySelectorAll('.close').forEach(closeBtn => {
         closeBtn.addEventListener('click', function() {
-            const modal = this.closest('.modal'); if (modal) modal.style.display = 'none';
+            const modal = this.closest('.modal'); if (modal) hideModal(modal);
         });
     });
 
     window.addEventListener('click', (e) => {
         if (e.target.classList && e.target.classList.contains('modal')) {
-            e.target.style.display = 'none';
+            hideModal(e.target);
         }
     });
 
@@ -806,7 +838,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (newProxyBtn) {
         newProxyBtn.onclick = () => {
             const modal = document.getElementById('new-proxy-modal');
-            if (modal) modal.style.display = 'block';
+            if (modal) showModal(modal);
         };
     }
 

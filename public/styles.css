@@ -258,6 +258,7 @@ body.light .theme-toggle::after{left:22px}
     z-index:1200000;
 }
 .modal .modal-content{
+    position: relative; /* ensure close button absolute positions relative to modal content */
     background: linear-gradient(180deg,var(--bg-card),var(--bg-soft));
     color:var(--card-text);
     border-radius:12px;
@@ -266,6 +267,7 @@ body.light .theme-toggle::after{left:22px}
     border:1px solid var(--border-soft);
     box-shadow:0 10px 30px rgba(0,0,0,0.5);
 }
+.modal .modal-content.modal-large{ max-width: 980px; width: calc(100% - 48px); }
 
 /* Make modal close clickable and obvious */
 .modal .close {
