@@ -267,6 +267,38 @@ body.light .theme-toggle::after{left:22px}
     box-shadow:0 10px 30px rgba(0,0,0,0.5);
 }
 
+/* Make modal close clickable and obvious */
+.modal .close {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    font-size: 20px;
+    color: var(--card-muted);
+    cursor: pointer; /* important fix requested */
+    user-select: none;
+}
+
+/* Stronger rule to make close button pointer even if other styles try to override */
+.modal .close, .modal .modal-content .close {
+    cursor: pointer !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+}
+.modal .close:hover { color: #fff; transform: scale(1.06); }
+
+/* Proxy test result styles */
+#proxy-test-result { margin-top:12px; font-size:13px; }
+#proxy-test-result .success { background: #c6f6d5; border:1px solid #86efac; padding:8px; border-radius:8px; color:#0f172a; }
+#proxy-test-result .error { background: #fed7d7; border:1px solid #fca5a5; padding:8px; border-radius:8px; color:#0f172a; }
+
+/* Import preview table styling */
+.import-table { width:100%; border-collapse:collapse; }
+.import-table th, .import-table td { padding:8px 10px; border-bottom:1px solid var(--border-soft); color:var(--card-text); }
+.import-table th { text-align:left; color:var(--card-muted); font-weight:700; }
+
+/* ensure modal content close button doesn't act like text */
+.modal .modal-content .close { cursor: pointer; }
+
 /* Loader */
 .loader {
     border: 3px solid #f3f3f3;

@@ -598,7 +598,7 @@ function setProxyInputsFromFound(found) {
 Array.from(document.getElementsByClassName('close')).forEach(el => {
     el.addEventListener('click', (e) => {
         const modal = el.closest('.modal');
-        if (modal) modal.style.display = 'none';
+        if (modal) hideModal(modal.id);
     });
 });
 
@@ -1309,3 +1309,108 @@ function restoreHeaderInteraction() {
         });
     } catch(e) { console.warn('restoreHeaderInteraction failed', e); }
 }
+
+// File import handling for profiles (attach using safeOn so it works even if DOM not ready)
+(function setupImportHandlers(){
+    async function handleFileChange(ev) {
+        try {
+            const f = ev.target.files && ev.target.files[0];
+            if (!f) return;
+            const txt = await f.text();
+            // split into non-empty trimmed lines
+            let rawLines = txt.split(/\r?\n/).map(l => l.trim()).filter(l => l.length);
+            // Ignore commented lines starting with '#' (allow leading whitespace)
+            rawLines = rawLines.filter(l => !/^\s*#/.test(l));
+            // Ignore header if present e.g. "name,proxy,type,tags,fingerprint"
+            if (rawLines.length > 0 && /^\s*name\s*,/i.test(rawLines[0])) rawLines.shift();
+
+            const parsed = [];
+            for (const line of rawLines) {
+                // split by commas not inside quotes
+                const cols = line.split(/,(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/);
+                const name = cols[0] ? cols[0].replace(/^\"|\"$/g, '').trim() : '';
+                const proxy = cols[1] ? cols[1].replace(/^\"|\"$/g, '').trim() : '';
+                const type = cols[2] ? cols[2].replace(/^\"|\"$/g, '').trim() : '';
+                const tagsRaw = cols[3] ? cols[3].replace(/^\"|\"$/g, '').trim() : '';
+                const tags = tagsRaw ? tagsRaw.split(/[;|,]/).map(t=>t.trim()).filter(Boolean) : [];
+                const fingerprint = cols.slice(4).join(',').trim();
+
+                // fallback heuristics if CSV columns missing: try legacy formats
+                if (!name && line.includes('|')) {
+                    const [n, p] = line.split('|').map(x=>x.trim());
+                    parsed.push({ name: n || '', proxy: p || '', type: type || '', tags, fingerprint });
+                    continue;
+                }
+                if (!name && line.split(':').length >= 2) {
+                    // line looks like host:port[:user:pass]
+                    const host = line.split(':')[0]; const port = line.split(':')[1] || '';
+                    parsed.push({ name: `${host}_${port}`, proxy: line, type: type || '', tags, fingerprint });
+                    continue;
+                }
+
+                parsed.push({ name: name || line, proxy: proxy || '', type, tags, fingerprint: fingerprint || null });
+            }
+
+            const importPreviewTable = getEl('import-preview-table');
+            const importPreviewCount = getEl('import-preview-count');
+            const importPreviewModal = getEl('import-preview-modal');
+
+            if (importPreviewTable) {
+                if (parsed.length === 0) {
+                    importPreviewTable.innerHTML = '<tbody><tr><td colspan="3">No profiles parsed from file</td></tr></tbody>';
+                } else {
+                    importPreviewTable.innerHTML = '<thead><tr><th>#</th><th>Name</th><th>Proxy</th></tr></thead><tbody>' + parsed.map((p,i)=>`<tr><td>${i+1}</td><td>${escapeHtml(p.name)}</td><td>${p.proxy?escapeHtml(p.proxy):''}</td></tr>`).join('') + '</tbody>';
+                }
+            }
+            if (importPreviewCount) importPreviewCount.textContent = `${parsed.length} profiles parsed`;
+            if (importPreviewModal) importPreviewModal._parsed = parsed;
+            if (importPreviewModal) showModal('import-preview-modal');
+
+            // clear file input so same file can be reselected later if needed
+            const fileInput = getEl('profiles-file-input'); if (fileInput) fileInput.value = '';
+        } catch (e) {
+            console.error('Import file read error', e);
+            showNotification('Failed to read import file', 'error');
+        }
+    }
+
+    // Attach via safeOn (handles DOM timing) for the hidden file input
+    safeOn('profiles-file-input', 'change', async (ev) => { await handleFileChange(ev); });
+
+    // Confirm import button — attach via safeOn so handler is present after DOM ready
+    safeOn('confirm-import-btn', 'click', async () => {
+        try {
+            const modal = getEl('import-preview-modal');
+            const parsed = modal && modal._parsed ? modal._parsed : [];
+            if (!parsed || parsed.length === 0) { showNotification('Nothing to import', 'error'); return; }
+            let success = 0;
+            for (const item of parsed) {
+                try {
+                    const body = { name: item.name };
+                    if (item.proxy) body.proxy = item.proxy;
+                    const resp = await fetch('/api/profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                    const data = await resp.json();
+                    if (data && data.success) {
+                        success++;
+                    } else {
+                        console.error('Import error for item', item, ':', data.error || 'Unknown error');
+                    }
+                } catch (e) {
+                    console.error('Import handler error for item', item, e);
+                }
+            }
+
+            showNotification(`Import completed: ${success} profiles added`, 'success');
+            closeAllModals();
+            await loadProfiles();
+        } catch (e) {
+            console.error('Import confirm handler error', e);
+            showNotification('Import confirmation failed', 'error');
+        }
+    });
+
+    // Cancel import
+    safeOn('cancel-import-btn', 'click', () => {
+        const modal = getEl('import-preview-modal'); if (modal) hideModal('import-preview-modal');
+    });
+})();
