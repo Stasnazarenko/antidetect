@@ -391,6 +391,41 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import axios from 'axios';
 
+
+// Helper: sanitize proxy object/string fields to remove stray quotes and normalize server/host/port
+function sanitizeProxyObject(obj) {
+    if (!obj) return obj;
+    try {
+        // if it's a string, return trimmed
+        if (typeof obj === 'string') return obj.trim().replace(/^"|"$/g, '').replace(/^'|'$/g, '');
+        const p = Object.assign({}, obj);
+        // Trim all string fields
+        for (const k of Object.keys(p)) {
+            if (typeof p[k] === 'string') {
+                p[k] = p[k].trim();
+                // remove surrounding quotes if any
+                if ((p[k].startsWith('"') && p[k].endsWith('"')) || (p[k].startsWith("'") && p[k].endsWith("'"))) {
+                    p[k] = p[k].slice(1, -1);
+                }
+            }
+        }
+        // If server is missing but host/port present, build it
+        if (!p.server && p.host && p.port) p.server = `${p.host}:${p.port}`;
+        // If server exists, ensure it's host:port without scheme
+        if (p.server) {
+            p.server = String(p.server).replace(/^(https?:\/\/|socks5?:\/\/|socks4?:\/\/)*/i, '');
+            // strip surrounding quotes again
+            p.server = p.server.replace(/^"|"$/g, '').replace(/^'|'$/g, '');
+        }
+        // ensure type field
+        if (!p.type && p.proxyType) p.type = p.proxyType;
+        if (!p.type) p.type = 'http';
+        return p;
+    } catch (e) {
+        return obj;
+    }
+}
+
 async function testProxy(proxyStringOrObj) {
     try {
         // Normalize proxy input to object with server, username, password, type
@@ -400,7 +435,7 @@ async function testProxy(proxyStringOrObj) {
 
         if (typeof proxyStringOrObj === 'object') {
             // Clone to avoid mutating original
-            proxyObj = Object.assign({}, proxyStringOrObj);
+            proxyObj = sanitizeProxyObject(Object.assign({}, proxyStringOrObj));
             // If stored proxies use host/port fields, build server field
             if (!proxyObj.server && proxyObj.host && proxyObj.port) {
                 proxyObj.server = `${proxyObj.host}:${proxyObj.port}`;
@@ -410,7 +445,7 @@ async function testProxy(proxyStringOrObj) {
             if (!proxyObj.password && proxyObj.pass) proxyObj.password = proxyObj.pass;
             if (!proxyObj.type) proxyObj.type = proxyObj.proxyType || 'http';
         } else if (typeof proxyStringOrObj === 'string') {
-            let s = proxyStringOrObj.trim();
+            let s = String(sanitizeProxyObject(proxyStringOrObj)).trim();
             // remove surrounding quotes if any
             if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
                 s = s.slice(1, -1);
@@ -591,18 +626,20 @@ app.post('/api/proxies', async (req, res) => {
     try {
         const proxy = req.body;
         if (!proxy) return res.status(400).json({ success: false, error: 'Proxy required' });
+        // sanitize proxy before saving
+        const sanitized = sanitizeProxyObject(proxy);
         // normalize defaults
-        if (!proxy.tags || !Array.isArray(proxy.tags)) proxy.tags = proxy.tags ? [proxy.tags] : [];
-        if (!proxy.status) proxy.status = 'inactive';
-        if (typeof proxy.testResult === 'undefined') proxy.testResult = null;
-        if (!proxy.createdAt) proxy.createdAt = new Date().toISOString();
+        if (!sanitized.tags || !Array.isArray(sanitized.tags)) sanitized.tags = sanitized.tags ? [sanitized.tags] : [];
+        if (!sanitized.status) sanitized.status = 'inactive';
+        if (typeof sanitized.testResult === 'undefined') sanitized.testResult = null;
+        if (!sanitized.createdAt) sanitized.createdAt = new Date().toISOString();
         const list = readProxiesFile();
         // ensure id
-        if (!proxy.id) proxy.id = Date.now().toString() + '_' + Math.random().toString(36).slice(2,8);
-        list.push(proxy);
+        if (!sanitized.id) sanitized.id = Date.now().toString() + '_' + Math.random().toString(36).slice(2,8);
+        list.push(sanitized);
         writeProxiesFile(list);
         io.emit('proxies_updated');
-        res.json({ success: true, proxy });
+        res.json({ success: true, proxy: sanitized });
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }

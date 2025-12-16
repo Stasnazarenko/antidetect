@@ -9,6 +9,18 @@ let selectedProfiles = new Set();
 // Safe getEl helper — define early so other code can use it
 function getEl(id) { return document.getElementById(id) || null; }
 
+// Escape HTML to safely insert user-provided strings into templates
+function escapeHtml(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/`/g, '&#96;');
+}
+
 // Pending handlers queue must exist before any safeOn calls
 const __pendingHandlers = [];
 
@@ -35,12 +47,18 @@ let bulkActionsDiv = null;
 function showModal(id) {
     const el = getEl(id);
     if (el) {
-        // Make modal visible and interactive
-        el.style.display = 'block';
+        // Make modal visible and interactive — use flex so center alignment works
+        el.style.display = 'flex';
         el.style.pointerEvents = 'auto';
+        el.style.alignItems = 'center';
+        el.style.justifyContent = 'center';
         // ensure modal-content also accepts pointer events
         const content = el.querySelector('.modal-content');
-        if (content) content.style.pointerEvents = 'auto';
+        if (content) {
+            content.style.pointerEvents = 'auto';
+            // ensure content has auto margins for small screens
+            content.style.margin = '16px';
+        }
         // autofocus first input in modal to improve UX
         try {
             const firstInput = el.querySelector('input, button, select, textarea');
@@ -55,6 +73,8 @@ function hideModal(id) {
     if (el) {
         el.style.display = 'none';
         el.style.pointerEvents = 'none';
+        el.style.alignItems = '';
+        el.style.justifyContent = '';
         const content = el.querySelector('.modal-content'); if (content) content.style.pointerEvents = 'none';
     }
 }
@@ -109,9 +129,9 @@ function updateStats() {
 
 // Відрендерити профілі
 function renderProfiles() {
-    const searchTerm = searchInput.value.toLowerCase();
-    const statusFilter = filterStatus.value;
-    const proxyFilter = filterProxy.value;
+    const searchTerm = (searchInput && searchInput.value ? searchInput.value : '').toLowerCase();
+    const statusFilter = (filterStatus && filterStatus.value) ? filterStatus.value : 'all';
+    const proxyFilter = (filterProxy && filterProxy.value) ? filterProxy.value : 'all';
 
     let filtered = profiles.filter(profile => {
         // Пошук
@@ -130,8 +150,10 @@ function renderProfiles() {
         return true;
     });
 
+    if (!profilesGrid) profilesGrid = getEl('profiles-grid');
+
     if (filtered.length === 0) {
-        profilesGrid.innerHTML = `
+        if (profilesGrid) profilesGrid.innerHTML = `
             <div class="empty-state" style="grid-column: 1 / -1;">
                 <h3>No profiles found</h3>
                 <p>Create a new profile to get started</p>
@@ -140,24 +162,25 @@ function renderProfiles() {
         return;
     }
 
-    profilesGrid.innerHTML = filtered.map(profile => {
+    // Build HTML using data- attributes and classes (no inline JS)
+    const html = filtered.map(profile => {
         const avatar = generateAvatar(profile.name);
         const isSelected = selectedProfiles.has(profile.name);
         const fpPreview = getFingerprintPreview(profile.fingerprint);
+        const safeName = escapeHtml(profile.name);
 
         return `
-        <div class="profile-card ${isSelected ? 'selected' : ''}" data-profile="${profile.name}">
+        <div class="profile-card ${isSelected ? 'selected' : ''}" data-profile="${safeName}">
             <input type="checkbox" class="profile-checkbox" 
-                   data-profile="${profile.name}" 
-                   ${isSelected ? 'checked' : ''}
-                   onclick="toggleSelect('${profile.name}', event)">
+                   data-profile="${safeName}"
+                   ${isSelected ? 'checked' : ''}>
             
             <div class="profile-avatar" style="background: ${avatar.color}">
-                ${avatar.initial}
+                ${escapeHtml(avatar.initial)}
             </div>
             
             <div class="profile-header">
-                <div class="profile-name">${profile.name}</div>
+                <div class="profile-name">${safeName}</div>
                 <div class="profile-status ${profile.open ? 'status-open' : 'status-closed'}">
                     ${profile.open ? '🟢 Open' : '⚫ Closed'}
                 </div>
@@ -171,52 +194,100 @@ function renderProfiles() {
                 ${profile.proxy && typeof profile.proxy === 'object' ? `
                 <div class="info-row">
                     <span class="info-label">Assigned proxy:</span>
-                    <span class="info-value">${profile.proxy.id || profile.proxy.server || profile.proxy}
-                        ${profile.proxy.tags && profile.proxy.tags.length ? `<span class=\"badge\">${profile.proxy.tags.join(', ')}</span>` : ''}
-                        ${profile.proxy.status ? `<span class=\"status-badge ${profile.proxy.status==='active'?'status-active':'status-failed'}\">${profile.proxy.status}</span>` : ''}
+                    <span class="info-value">${escapeHtml(profile.proxy.id || profile.proxy.server || (typeof profile.proxy === 'string' ? profile.proxy : ''))}
+                        ${profile.proxy.tags && profile.proxy.tags.length ? `<span class=\"badge\">${escapeHtml(profile.proxy.tags.join(', '))}</span>` : ''}
+                        ${profile.proxy.status ? `<span class=\"status-badge ${profile.proxy.status==='active'?'status-active':'status-failed'}\">${escapeHtml(profile.proxy.status)}</span>` : ''}
                     </span>
                 </div>
                 ` : ''}
                 <div class="info-row">
                     <span class="info-label">OS:</span>
-                    <span class="info-value">${fpPreview.os}</span>
+                    <span class="info-value">${escapeHtml(fpPreview.os)}</span>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Screen:</span>
-                    <span class="info-value">${fpPreview.screen}</span>
+                    <span class="info-value">${escapeHtml(fpPreview.screen)}</span>
                 </div>
                 <div class="info-row">
                     <span class="info-label">Cores:</span>
-                    <span class="info-value">${fpPreview.cores}</span>
+                    <span class="info-value">${escapeHtml(fpPreview.cores)}</span>
                 </div>
                 ${profile.proxy ? `
                 <div class="info-row">
                     <span class="info-label">Type:</span>
-                    <span class="info-value">${profile.proxyType.toUpperCase()}</span>
+                    <span class="info-value">${escapeHtml((profile.proxyType || '').toString().toUpperCase())}</span>
                 </div>
                 ` : ''}
             </div>
             
             <div class="profile-actions">
-                <button class="btn ${profile.open ? 'btn-danger' : 'btn-success'}" 
-                        onclick="toggleProfile('${profile.name}', ${profile.open}, event)">
+                <button class="btn btn-action-open ${profile.open ? 'btn-danger' : 'btn-success'}" data-name="${safeName}" data-open="${profile.open}">
                     ${profile.open ? '⏹️ Close' : '▶️ Open'}
                 </button>
-                <button class="btn btn-primary" onclick="viewFingerprint('${profile.name}')">
-                    🖐️ Fingerprint
-                </button>
-                <button class="btn btn-primary" onclick="configureProxy('${profile.name}')">
-                    🔧 Proxy
-                </button>
-                <button class="btn btn-danger" onclick="deleteProfile('${profile.name}', event)">
-                    🗑️ Delete
-                </button>
+                <button class="btn btn-action-fp btn-primary" data-name="${safeName}">🖐️ Fingerprint</button>
+                <button class="btn btn-action-proxy btn-primary" data-name="${safeName}">🔧 Proxy</button>
+                <button class="btn btn-action-delete btn-danger" data-name="${safeName}">🗑️ Delete</button>
             </div>
         </div>
     `;
     }).join('');
 
+    if (profilesGrid) profilesGrid.innerHTML = html;
+
+    // After rendering, update bulk actions and ensure event delegation is attached
     updateBulkActions();
+    attachProfilesGridDelegation();
+}
+
+// Event delegation for profiles grid: attach only once
+function attachProfilesGridDelegation() {
+    if (!profilesGrid) profilesGrid = getEl('profiles-grid');
+    if (!profilesGrid) return;
+    if (profilesGrid._delegationAttached) return;
+
+    profilesGrid.addEventListener('click', async (ev) => {
+        const openBtn = ev.target.closest('.btn-action-open');
+        const fpBtn = ev.target.closest('.btn-action-fp');
+        const proxyBtn = ev.target.closest('.btn-action-proxy');
+        const delBtn = ev.target.closest('.btn-action-delete');
+        const checkbox = ev.target.closest('.profile-checkbox');
+
+        if (checkbox) {
+            const name = checkbox.getAttribute('data-profile');
+            if (!name) return;
+            if (checkbox.checked) selectedProfiles.add(name); else selectedProfiles.delete(name);
+            renderProfiles();
+            return;
+        }
+
+        if (openBtn) {
+            ev.preventDefault(); ev.stopPropagation();
+            const name = openBtn.getAttribute('data-name');
+            const isOpen = openBtn.getAttribute('data-open') === 'true' || openBtn.classList.contains('btn-danger');
+            await toggleProfile(name, isOpen, ev);
+            return;
+        }
+        if (fpBtn) {
+            ev.preventDefault(); ev.stopPropagation();
+            const name = fpBtn.getAttribute('data-name');
+            viewFingerprint(name);
+            return;
+        }
+        if (proxyBtn) {
+            ev.preventDefault(); ev.stopPropagation();
+            const name = proxyBtn.getAttribute('data-name');
+            configureProxy(name);
+            return;
+        }
+        if (delBtn) {
+            ev.preventDefault(); ev.stopPropagation();
+            const name = delBtn.getAttribute('data-name');
+            deleteProfile(name, ev);
+            return;
+        }
+    }, true);
+
+    profilesGrid._delegationAttached = true;
 }
 
 // Отримати preview fingerprint
@@ -777,6 +848,12 @@ window.addEventListener('unhandledrejection', function (ev) {
 function initApp() {
     try {
         console.log('[app.js] initApp starting, pending handlers=', __pendingHandlers.length);
+        // Defensive: ensure no dropdowns are stuck open from prior state
+        try {
+            const allDd = document.querySelectorAll('.dropdown');
+            allDd.forEach(d => d.classList.remove('open'));
+            console.debug('[app.js] forced close of dropdowns at init');
+        } catch (e) { console.warn('[app.js] failed to force-close dropdowns', e); }
         // rebind DOM refs now that DOM is ready
         profilesGrid = getEl('profiles-grid');
         searchInput = getEl('search-input');
@@ -1180,18 +1257,18 @@ function registerHeaderDelegation() {
 }
 
 // Additional fallback: document-level listener for any `.item` clicks to ensure actions always fire
-document.addEventListener('click', function(ev) {
-    try {
-        const item = ev.target.closest && ev.target.closest('.item');
-        if (!item) return;
-        // prevent other handlers from suppressing
-        ev.preventDefault(); ev.stopPropagation();
-        const id = item.id;
-        if (!id) return;
-        console.debug('[app.js] document fallback click for item', id);
-        handleHeaderActionById(id);
-    } catch (e) { /* ignore */ }
-}, true);
+// document.addEventListener('click', function(ev) {
+//     try {
+//         const item = ev.target.closest && ev.target.closest('.item');
+//         if (!item) return;
+//         // prevent other handlers from suppressing
+//         ev.preventDefault(); ev.stopPropagation();
+//         const id = item.id;
+//         if (!id) return;
+//         console.debug('[app.js] document fallback click for item', id);
+//         handleHeaderActionById(id);
+//     } catch (e) { /* ignore */ }
+// }, true);
 
 // Direct fallback for proxy manager button (in case id-based safeOn didn't attach)
 (function attachProxyBtnFallback(){
