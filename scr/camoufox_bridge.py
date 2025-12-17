@@ -48,13 +48,6 @@ class BrowserManager:
                 {"cores": 12, "inner_w": 1728, "inner_h": 1117, "outer_w": 1728, "outer_h": 1186},
                 {"cores": 14, "inner_w": 1920, "inner_h": 1200, "outer_w": 1920, "outer_h": 1269},   # "more space"
                 {"cores": 16, "inner_w": 1920, "inner_h": 1200, "outer_w": 1920, "outer_h": 1269},
-
-                # 13–14. Зовнішній монітор 2560×1440 (ультравайд або 27" 2K) підключений до ARM Mac
-                {"cores": 12, "inner_w": 2560, "inner_h": 1440, "outer_w": 2560, "outer_h": 1509},
-                {"cores": 14, "inner_w": 2560, "inner_h": 1440, "outer_w": 2560, "outer_h": 1509},
-
-                # 15. Ультравайд 3440×1440 (популярний зовнішній монітор для M-серії)
-                {"cores": 14, "inner_w": 3440, "inner_h": 1440, "outer_w": 3440, "outer_h": 1509},
             ]
 
             variant = random.choice(rm_mac_variants)
@@ -175,7 +168,8 @@ class BrowserManager:
                 profile_path = self.profiles_dir / profile_name
                 profile_path.mkdir(exist_ok=True)
 
-                os_type = "macos"  # Генеруємо для macOS
+                os_type_options = ["macos", "windows"]
+                os_type = random.choice(os_type_options) # Генеруємо для macOS
                 # fingerprint: використовуємо dict якщо є, інакше дефолт
                 if "fingerprint" in config and isinstance(config["fingerprint"], dict):
                     fingerprint_config = self._convert_db_fingerprint(config["fingerprint"])
