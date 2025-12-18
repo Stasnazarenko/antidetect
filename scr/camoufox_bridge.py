@@ -176,47 +176,38 @@ class BrowserManager:
                     # 2) як URL string з авторизацією або без
                     if isinstance(proxy_try, dict):
                         server = proxy_try.get('server')
-                        typ = proxy_try.get('type', 'http')
                         user = proxy_try.get('username') or proxy_try.get('user') or proxy_try.get('login')
                         pwd = proxy_try.get('password') or proxy_try.get('pass')
-                        # normalize server into host and port
+                        # normalize server into host:port
                         host = None
                         port = None
                         try:
                             if server and isinstance(server, str) and ':' in server:
                                 parts = server.split(':')
                                 host = parts[0]
-                                port = int(parts[1]) if parts[1].isdigit() else parts[1]
+                                port = parts[1]
                         except Exception:
                             host = None; port = None
 
-                        # prefer passing a mapping the camoufox library expects
                         if host and port:
-                            normalized_map = { 'host': host, 'port': port }
+                            # only two attempts: mapping and plain server string
+                            normalized_map = { 'server': f"{host}:{port}" }
                             if user: normalized_map['username'] = user
                             if pwd: normalized_map['password'] = pwd
-                            # map type -> protocol key
-                            normalized_map['protocol'] = typ or 'http'
                             attempts.append(normalized_map)
+                            attempts.append(f"{host}:{port}")
 
-                        # also try URL/string variants as fallback
-                        try:
-                            if user and pwd and host and port:
-                                attempts.append(f"{typ}://{user}:{pwd}@{host}:{port}")
-                            if host and port:
-                                attempts.append(f"{typ}://{host}:{port}")
-                                attempts.append(f"{host}:{port}")
-                        except Exception:
-                            pass
                     elif isinstance(proxy_try, str):
-                        # parse host:port from string and add mapping
                         try:
                             if ':' in proxy_try:
                                 h, p = proxy_try.split(':', 1)
-                                attempts.append({ 'host': h, 'port': int(p) if p.isdigit() else p, 'protocol': 'http' })
+                                attempts.append({ 'server': f"{h}:{p}" })
                         except Exception:
-                            # fallback: keep as string if cannot parse (camoufox may still accept)
                             attempts.append(proxy_try)
+
+                    # If we couldn't build any attempts, fail fast
+                    if not attempts:
+                        return {"success": False, "error": "No valid proxy formats to try", "proxy": proxy_try}
 
                     last_error = None
                     success = False
@@ -233,11 +224,11 @@ class BrowserManager:
 
                             camoufox = AsyncCamoufox(**trial_config)
                             try:
-                                browser = await camoufox.start()
+                                # faster per-attempt timeout
+                                browser = await asyncio.wait_for(camoufox.start(), timeout=3)
                             except Exception as e:
                                 last_error = str(e)
                                 print(f"[BRIDGE] camoufox.start() failed on attempt #{idx+1}: {e}", file=sys.stderr)
-                                # attempt to stop camoufox if available
                                 try:
                                     if hasattr(camoufox, 'stop'):
                                         await camoufox.stop()
@@ -247,11 +238,11 @@ class BrowserManager:
 
                             # short settle
                             try:
-                                await asyncio.sleep(0.5)
+                                await asyncio.sleep(0.3)
                             except Exception:
                                 pass
 
-                            # check by trying to get/create a page instead of is_connected
+                            # check/create page
                             page = None
                             try:
                                 pages = getattr(browser, 'pages', None)
@@ -262,7 +253,6 @@ class BrowserManager:
                             except Exception as e:
                                 last_error = str(e)
                                 print(f"[BRIDGE] Failed to get/create page on attempt #{idx+1}: {e}", file=sys.stderr)
-                                # cleanup
                                 try:
                                     if hasattr(browser, 'close'):
                                         await browser.close()
@@ -275,31 +265,14 @@ class BrowserManager:
                                     pass
                                 continue
 
-                            # If we have a page - success
                             if page:
                                 launch_config['proxy'] = attempt_proxy
                                 success = True
-                                # store browser and page to reuse after loop
                                 final_browser = browser
                                 final_camoufox = camoufox
                                 final_page = page
                                 print(f"[BRIDGE] Proxy attempt #{idx+1} worked for {profile_name}", file=sys.stderr)
                                 break
-                            else:
-                                last_error = 'no page available after start'
-                                print(f"[BRIDGE] No page available after start on attempt #{idx+1}", file=sys.stderr)
-                                # cleanup
-                                try:
-                                    if hasattr(browser, 'close'):
-                                        await browser.close()
-                                except Exception:
-                                    pass
-                                try:
-                                    if hasattr(camoufox, 'stop'):
-                                        await camoufox.stop()
-                                except Exception:
-                                    pass
-                                continue
 
                         except Exception as e:
                             last_error = str(e)
@@ -313,42 +286,7 @@ class BrowserManager:
 
                     if not success:
                         print(f"[BRIDGE] All proxy attempts failed for {profile_name}, last error: {last_error}", file=sys.stderr)
-                        # Fallback: try launching without proxy (best-effort). Some environments prefer direct connection.
-                        try:
-                            print(f"[BRIDGE] Attempting fallback launch without proxy for {profile_name}", file=sys.stderr)
-                            no_proxy_config = dict(launch_config)
-                            if 'proxy' in no_proxy_config: del no_proxy_config['proxy']
-                            camoufox = AsyncCamoufox(**no_proxy_config)
-                            browser = await camoufox.start()
-                            # attempt to create/get page
-                            try:
-                                pages = getattr(browser, 'pages', None)
-                                if pages and len(pages) > 0:
-                                    page = pages[0]
-                                else:
-                                    page = await browser.new_page()
-                            except Exception as e:
-                                print(f"[BRIDGE] Fallback no-proxy start created browser but failed to get page: {e}", file=sys.stderr)
-                                try:
-                                    if hasattr(browser, 'close'):
-                                        await browser.close()
-                                except Exception:
-                                    pass
-                                try:
-                                    if hasattr(camoufox, 'stop'):
-                                        await camoufox.stop()
-                                except Exception:
-                                    pass
-                                return {"success": False, "error": "Browser failed to start after proxy attempts", "detail": last_error, "proxy_attempts": attempts}
-
-                            # success without proxy
-                            final_browser = browser
-                            final_camoufox = camoufox
-                            final_page = page
-                            print(f"[BRIDGE] Fallback no-proxy launch succeeded for {profile_name}", file=sys.stderr)
-                        except Exception as e:
-                            print(f"[BRIDGE] Fallback no-proxy launch also failed for {profile_name}: {e}", file=sys.stderr)
-                            return {"success": False, "error": "Browser failed to start/connect with proxy", "detail": last_error, "proxy_attempts": attempts}
+                        return {"success": False, "error": "Browser failed to start/connect with proxy", "detail": last_error, "proxy_attempts": attempts}
 
                 else:
                     # без проксі — звичайний старт

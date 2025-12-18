@@ -116,7 +116,7 @@ async function ensureBridge() {
     await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
             reject(new Error('Bridge startup timeout'));
-        }, 10000);
+        }, 8000);
 
         pythonBridge.stdout.once('data', (data) => {
             clearTimeout(timeout);
@@ -189,7 +189,7 @@ async function testProxyLocal(proxyObj) {
         const resp = await axios.get('https://api.ipify.org?format=json', {
             httpAgent: agent,
             httpsAgent: agent,
-            timeout: 12000
+            timeout: 6000
         });
         return resp && resp.data && resp.data.ip;
     } catch (err) {
@@ -348,15 +348,15 @@ async function launch_Profile(name) {
     const resp = await sendBridgeCommand(bridge, command, 30000);
     if (resp && resp.success) {
         // wait for bridge internal registration (best-effort)
-        const waitStart = Date.now(); const waitTimeout = 12000; let seen = false;
+        const waitStart = Date.now(); const waitTimeout = 3000; let seen = false;
         while ((Date.now() - waitStart) < waitTimeout) {
             try {
                 // try to query bridge status for profile via a lightweight action if available
                 const statusCmd = { action: 'status', profile: name };
-                const st = await sendBridgeCommand(bridge, statusCmd, 1000).catch(() => null);
+                const st = await sendBridgeCommand(bridge, statusCmd, 800).catch(() => null);
                 if (st && (st.open || st.success)) { seen = true; break; }
             } catch (e) {}
-            await new Promise(r => setTimeout(r, 300));
+            await new Promise(r => setTimeout(r, 200));
         }
         if (!seen) console.warn(timeLog() + ` launch_Profile: bridge did not confirm profile ${name} registration in ${waitTimeout}ms`);
         return resp;
@@ -706,7 +706,7 @@ async function run_RPA(profile, sequence = [], options = {}) {
         options: options || {}
     };
 
-    const resp = await sendBridgeCommand(bridge, command, 60000);
+    const resp = await sendBridgeCommand(bridge, command, 60000).catch(err => ({ success: false, error: err.message }));
     return resp;
 }
 
