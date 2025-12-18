@@ -543,6 +543,105 @@ class BrowserManager:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    async def execute_rpa_sequence(self, profile_name: str, sequence: list, options: dict):
+        """Execute a simple RPA sequence on an opened profile.
+        Supported action types (case-insensitive):
+          - open_url: { "type": "open_url", "url": "https://...", "delay": optional_ms }
+          - execute_js: { "type": "execute_js", "code": "return 1+1;" }
+          - click: { "type": "click", "selector": "#btn" }
+          - fill: { "type": "fill", "selector": "#input", "value": "text" }
+        The method returns a dict { success: bool, results: [ ... ] } or an error object on failure.
+        """
+        try:
+            if profile_name not in self.browsers:
+                return {"success": False, "error": "Profile not open"}
+
+            page = self.browsers[profile_name]["page"]
+            results = []
+
+            # Normalize sequence
+            if not sequence:
+                return {"success": True, "results": []}
+
+            for idx, step in enumerate(sequence):
+                try:
+                    if not isinstance(step, dict):
+                        results.append({"index": idx, "success": False, "error": "Step is not an object"})
+                        return {"success": False, "results": results, "error": f"Invalid step at index {idx}"}
+
+                    typ = (step.get('type') or '').lower()
+
+                    if typ in ('open_url', 'navigate', 'goto'):
+                        url = step.get('url') or step.get('value')
+                        if not url:
+                            results.append({"index": idx, "type": typ, "success": False, "error": "missing url"})
+                            return {"success": False, "results": results, "error": f"missing url at step {idx}"}
+                        await page.goto(url, wait_until='networkidle')
+                        results.append({"index": idx, "type": typ, "success": True, "url": url})
+                        # optional delay in milliseconds
+                        delay = int(step.get('delay') or 0)
+                        if delay > 0:
+                            await asyncio.sleep(delay/1000.0)
+
+                    elif typ in ('execute_js', 'exec_js', 'evaluate', 'run_js'):
+                        code = step.get('code') or step.get('script') or step.get('js')
+                        if code is None:
+                            results.append({"index": idx, "type": typ, "success": False, "error": "missing code"})
+                            return {"success": False, "results": results, "error": f"missing code at step {idx}"}
+                        # page.evaluate may expect a function or expression; try as-is
+                        try:
+                            val = await page.evaluate(code)
+                            results.append({"index": idx, "type": typ, "success": True, "result": val})
+                        except Exception as e:
+                            results.append({"index": idx, "type": typ, "success": False, "error": str(e)})
+                            return {"success": False, "results": results, "error": f"js execution failed at step {idx}: {e}"}
+
+                    elif typ in ('click', 'click_selector'):
+                        sel = step.get('selector') or step.get('sel')
+                        if not sel:
+                            results.append({"index": idx, "type": typ, "success": False, "error": "missing selector"})
+                            return {"success": False, "results": results, "error": f"missing selector at step {idx}"}
+                        try:
+                            await page.click(sel)
+                            results.append({"index": idx, "type": typ, "success": True, "selector": sel})
+                        except Exception as e:
+                            results.append({"index": idx, "type": typ, "success": False, "error": str(e)})
+                            return {"success": False, "results": results, "error": f"click failed at step {idx}: {e}"}
+
+                    elif typ in ('fill', 'type'):
+                        sel = step.get('selector') or step.get('sel')
+                        value = step.get('value') or step.get('text') or ''
+                        if not sel:
+                            results.append({"index": idx, "type": typ, "success": False, "error": "missing selector"})
+                            return {"success": False, "results": results, "error": f"missing selector at step {idx}"}
+                        try:
+                            # try fill first, fallback to type
+                            if hasattr(page, 'fill'):
+                                await page.fill(sel, value)
+                            else:
+                                await page.type(sel, value)
+                            results.append({"index": idx, "type": typ, "success": True, "selector": sel})
+                        except Exception as e:
+                            results.append({"index": idx, "type": typ, "success": False, "error": str(e)})
+                            return {"success": False, "results": results, "error": f"fill failed at step {idx}: {e}"}
+
+                    else:
+                        # Unknown action: return error so caller can see
+                        results.append({"index": idx, "type": typ, "success": False, "error": "unknown action type"})
+                        return {"success": False, "results": results, "error": f"unknown action type '{typ}' at step {idx}"}
+
+                except Exception as e:
+                    # step-level exception
+                    tb = traceback.format_exc()
+                    results.append({"index": idx, "success": False, "error": str(e), "trace": tb})
+                    return {"success": False, "results": results, "error": f"exception at step {idx}: {e}", "trace": tb}
+
+            # Completed all steps
+            return {"success": True, "results": results}
+
+        except Exception as e:
+            return {"success": False, "error": str(e), "trace": traceback.format_exc()}
+
 
 async def main():
     manager = BrowserManager()

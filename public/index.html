@@ -202,6 +202,10 @@
                 </select>
             </div>
             <div id="rpa-quick-selected" style="margin-top:8px; color:#718096;">Selected profiles: <span id="rpa-selected-count">0</span></div>
+            <!-- New: ephemeral fallback option -->
+            <div style="margin-top:8px;">
+                <label style="font-size:13px; color:#9ca3af;"><input type="checkbox" id="rpa-use-ephemeral" style="margin-right:8px;" /> If no profiles selected, create ephemeral profile and run RPA</label>
+            </div>
             <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
                 <button id="rpa-run-selected-btn" class="btn btn-success">Run on selected</button>
                 <button id="rpa-run-single-btn" class="btn btn-secondary" style="display:none">Run on single</button>

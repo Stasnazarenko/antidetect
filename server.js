@@ -903,11 +903,52 @@ app.post('/api/rpa/execute', async (req, res) => {
 
         const start = Date.now();
         let result;
+
+        // Helper to call run_RPA and capture errors
+        const callRunner = async () => {
+            try {
+                return await manage.run_RPA(profile, sequence, options || {});
+            } catch (e) {
+                return { success: false, error: String(e && e.message ? e.message : e) };
+            }
+        };
+
+        // First attempt
+        result = await callRunner();
+
+        // If the result indicates the profile was not open, try to open it and retry once
         try {
-            result = await manage.run_RPA(profile, sequence, options || {});
-        } catch (e) {
-            result = { success: false, error: String(e && e.message ? e.message : e) };
+            const extractError = (r) => {
+                if (!r) return '';
+                if (typeof r === 'string') return r;
+                if (r.error) return r.error;
+                if (r.result && r.result.error) return r.result.error;
+                return '';
+            };
+
+            const errMsg = (result && extractError(result)) || '';
+            if (errMsg && /profile not open/i.test(errMsg)) {
+                console.log('[API][RPA] profile not open, attempting to open and retry:', profile);
+                try {
+                    if (manage.open_Profile) {
+                        // Try to open profile (this will launch browser via bridge)
+                        await manage.open_Profile(profile);
+                        // Wait a bit for the bridge/browser to settle
+                        await new Promise(r => setTimeout(r, 1200));
+                        // Retry RPA
+                        result = await callRunner();
+                    } else {
+                        console.warn('[API][RPA] manage.open_Profile not available on server');
+                    }
+                } catch (openErr) {
+                    console.error('[API][RPA] Failed to open profile for RPA retry:', openErr);
+                    result = { success: false, error: 'Failed to open profile: ' + (openErr && openErr.message ? openErr.message : String(openErr)) };
+                }
+            }
+        } catch (inner) {
+            console.error('[API][RPA] Error handling profile-open retry logic:', inner);
         }
+
         const end = Date.now();
 
         // Persist run
@@ -917,7 +958,7 @@ app.post('/api/rpa/execute', async (req, res) => {
                 id: Date.now().toString() + '_' + Math.random().toString(36).slice(2,8),
                 profile: profile,
                 success: !!(result && result.success),
-                error: result && result.error ? result.error : null,
+                error: result && (result.error || (result.result && result.result.error)) ? (result.error || result.result.error) : null,
                 sequence: JSON.stringify(sequence),
                 options: options || {},
                 durationMs: end - start,

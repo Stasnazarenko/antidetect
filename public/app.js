@@ -168,11 +168,12 @@ function renderProfiles() {
         const isSelected = selectedProfiles.has(profile.name);
         const fpPreview = getFingerprintPreview(profile.fingerprint);
         const safeName = escapeHtml(profile.name);
+        const encName = encodeURIComponent(profile.name);
 
         return `
-        <div class="profile-card ${isSelected ? 'selected' : ''}" data-profile="${safeName}">
+        <div class="profile-card ${isSelected ? 'selected' : ''}" data-profile="${encName}">
             <input type="checkbox" class="profile-checkbox" 
-                   data-profile="${safeName}"
+                   data-profile="${encName}"
                    ${isSelected ? 'checked' : ''}>
             
             <div class="profile-avatar" style="background: ${avatar.color}">
@@ -221,16 +222,16 @@ function renderProfiles() {
             </div>
             
             <div class="profile-actions">
-                <button class="btn btn-action-open ${profile.open ? 'btn-danger' : 'btn-success'}" data-name="${safeName}" data-open="${profile.open}">
+                <button class="btn btn-action-open ${profile.open ? 'btn-danger' : 'btn-success'}" data-name="${encName}" data-open="${profile.open}">
                     ${profile.open ? '⏹️ Close' : '▶️ Open'}
                 </button>
-                <button class="btn btn-action-fp btn-primary" data-name="${safeName}">🖐️ Fingerprint</button>
-                <button class="btn btn-action-proxy btn-primary" data-name="${safeName}">🔧 Proxy</button>
-                <button class="btn btn-action-delete btn-danger" data-name="${safeName}">🗑️ Delete</button>
-            </div>
-        </div>
-    `;
-    }).join('');
+                <button class="btn btn-action-fp btn-primary" data-name="${encName}">🖐️ Fingerprint</button>
+                <button class="btn btn-action-proxy btn-primary" data-name="${encName}">🔧 Proxy</button>
+                <button class="btn btn-action-delete btn-danger" data-name="${encName}">🗑️ Delete</button>
+             </div>
+         </div>
+     `;
+     }).join('');
 
     if (profilesGrid) profilesGrid.innerHTML = html;
 
@@ -251,9 +252,24 @@ function attachProfilesGridDelegation() {
         const proxyBtn = ev.target.closest('.btn-action-proxy');
         const delBtn = ev.target.closest('.btn-action-delete');
         const checkbox = ev.target.closest('.profile-checkbox');
+        const card = ev.target.closest('.profile-card');
+
+        // If user clicked on the card (but not on a button), toggle selection for convenience
+        if (card && !openBtn && !fpBtn && !proxyBtn && !delBtn && !checkbox && !ev.target.closest('.btn')) {
+            try {
+                const raw = card.getAttribute('data-profile');
+                const name = raw ? decodeURIComponent(raw) : null;
+                if (name) {
+                    if (selectedProfiles.has(name)) selectedProfiles.delete(name); else selectedProfiles.add(name);
+                    renderProfiles();
+                }
+                return;
+            } catch(e) { /* ignore */ }
+        }
 
         if (checkbox) {
-            const name = checkbox.getAttribute('data-profile');
+            const raw = checkbox.getAttribute('data-profile');
+            const name = raw ? decodeURIComponent(raw) : null;
             if (!name) return;
             if (checkbox.checked) selectedProfiles.add(name); else selectedProfiles.delete(name);
             renderProfiles();
@@ -262,26 +278,30 @@ function attachProfilesGridDelegation() {
 
         if (openBtn) {
             ev.preventDefault(); ev.stopPropagation();
-            const name = openBtn.getAttribute('data-name');
+            const raw = openBtn.getAttribute('data-name');
+            const name = raw ? decodeURIComponent(raw) : null;
             const isOpen = openBtn.getAttribute('data-open') === 'true' || openBtn.classList.contains('btn-danger');
             await toggleProfile(name, isOpen, ev);
             return;
         }
         if (fpBtn) {
             ev.preventDefault(); ev.stopPropagation();
-            const name = fpBtn.getAttribute('data-name');
+            const raw = fpBtn.getAttribute('data-name');
+            const name = raw ? decodeURIComponent(raw) : null;
             viewFingerprint(name);
             return;
         }
         if (proxyBtn) {
             ev.preventDefault(); ev.stopPropagation();
-            const name = proxyBtn.getAttribute('data-name');
+            const raw = proxyBtn.getAttribute('data-name');
+            const name = raw ? decodeURIComponent(raw) : null;
             configureProxy(name);
             return;
         }
         if (delBtn) {
             ev.preventDefault(); ev.stopPropagation();
-            const name = delBtn.getAttribute('data-name');
+            const raw = delBtn.getAttribute('data-name');
+            const name = raw ? decodeURIComponent(raw) : null;
             deleteProfile(name, ev);
             return;
         }
@@ -1314,7 +1334,7 @@ function restoreHeaderInteraction() {
                 const type = cols[2] ? cols[2].replace(/^\"|\"$/g, '').trim() : '';
                 const tagsRaw = cols[3] ? cols[3].replace(/^\"|\"$/g, '').trim() : '';
                 const tags = tagsRaw ? tagsRaw.split(/[;|,]/).map(t=>t.trim()).filter(Boolean) : [];
-                const fingerprint = cols.slice(4).join(',').trim();
+                const fingerprint = cols.slice(4).trim();
 
                 // fallback heuristics if CSV columns missing: try legacy formats
                 if (!name && line.includes('|')) {
@@ -1450,6 +1470,8 @@ async function runRpaOnSelected() {
     if (!sel || !sel.value) { showNotification('Choose a template first', 'error'); return; }
     const tplId = sel.value;
 
+    console.debug('[RPA] runRpaOnSelected called, tplId=', tplId, 'selectedProfiles=', Array.from(selectedProfiles));
+
     // find template in cache
     let tpl = rpaTemplatesCache.find(t => t.id === tplId);
     if (!tpl) {
@@ -1476,10 +1498,14 @@ async function runRpaOnSelected() {
                 // guard parse
                 let data;
                 try { data = await resp2.json(); } catch (e) { data = { success: false, error: 'Invalid JSON from server' }; }
-                if (data && data.success) {
+                console.debug('[RPA] execute response for', p, data);
+                // server wraps actual runner result in data.result
+                const runner = data && data.result ? data.result : null;
+                if (runner && runner.success) {
                     appendRpaLog(`✅ ${p}: success`);
                 } else {
-                    appendRpaLog(`❌ ${p}: ${data && (data.error || data.message) ? (data.error || data.message) : 'failed'}`);
+                    const errMsg = (runner && runner.error) ? runner.error : (data && (data.error || data.message)) ? (data.error || data.message) : 'failed';
+                    appendRpaLog(`❌ ${p}: ${errMsg}`);
                 }
             } catch (e) {
                 appendRpaLog(`❌ ${p}: ${e && e.message ? e.message : String(e)}`);
@@ -1559,8 +1585,87 @@ safeOn('rpa-template-save-btn', 'click', async (e) => {
         } else {
             showNotification('Failed to save template', 'error');
         }
+
     } catch (e) {
-        console.error('rpa save error', e);
-        showNotification('Save failed', 'error');
+        console.error('rpa-template-save error', e);
+        showNotification('Failed to save template', 'error');
     }
 });
+
+// Helper: run RPA sequence on single profile name (used for ephemeral fallback)
+async function runRpaOnProfile(profileName, tplId) {
+    const tpl = rpaTemplatesCache.find(t => t.id === tplId);
+    if (!tpl) {
+        await loadRpaTemplates();
+    }
+    const tpl2 = rpaTemplatesCache.find(t => t.id === tplId);
+    if (!tpl2) { showNotification('Template not found', 'error'); return; }
+    const sequence = tpl2.sequence || [];
+    const logDiv = getEl('rpa-quick-log'); if (logDiv) { logDiv.style.display = 'block'; logDiv.innerHTML = ''; }
+    appendRpaLog(`Starting on ${profileName} ...`);
+    try {
+        const resp = await fetch('/api/rpa/execute', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ profile: profileName, sequence: sequence, options: {} }) });
+        let j;
+        try { j = await resp.json(); } catch(e) { j = { success: false, error: 'Invalid JSON' }; }
+        console.debug('[RPA] execute response for', profileName, j);
+        const runner = j && j.result ? j.result : null;
+        if (runner && runner.success) appendRpaLog(`✅ ${profileName}: success`); else appendRpaLog(`❌ ${profileName}: ${runner && runner.error ? runner.error : (j && (j.error||j.message) ? (j.error||j.message) : 'failed')}`);
+    } catch (e) {
+        appendRpaLog(`❌ ${profileName}: ${e && e.message ? e.message : String(e)}`);
+    }
+}
+
+// Attach click for RPA run selected button with ephemeral fallback
+safeOn('rpa-run-selected-btn', 'click', async (e) => {
+    try {
+        e && e.preventDefault && e.preventDefault();
+        const tplSel = getEl('rpa-template-select');
+        if (!tplSel || !tplSel.value) { showNotification('Choose RPA template first', 'error'); return; }
+        const tplId = tplSel.value;
+
+        const profilesToRun = Array.from(selectedProfiles);
+        if (profilesToRun.length > 0) {
+            // regular path
+            await runRpaOnSelected();
+            return;
+        }
+
+        // No selected profiles: check ephemeral checkbox
+        const useEphemeral = (getEl('rpa-use-ephemeral') && getEl('rpa-use-ephemeral').checked);
+        if (!useEphemeral) { showNotification('No profiles selected', 'error'); return; }
+
+        // Create ephemeral profile via API and run RPA on it
+        try {
+            showNotification('Creating ephemeral profile...', 'info');
+            const resp = await fetch('/api/profiles/ephemeral', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ /* options empty - server picks defaults */ }) });
+            const j = await resp.json();
+            if (!j || !j.success) {
+                showNotification(j && j.error ? j.error : 'Failed to create ephemeral profile', 'error');
+                return;
+            }
+            const ephemeralName = j.ephemeral || j.name || (j.profile && j.profile.name) || null;
+            if (!ephemeralName) {
+                showNotification('Ephemeral created but no name returned', 'error');
+                return;
+            }
+            showNotification('Ephemeral created: ' + ephemeralName, 'success');
+            // run RPA on this ephemeral profile
+            await runRpaOnProfile(ephemeralName, tplId);
+            // close modal after short delay
+            setTimeout(() => { try { hideModal('rpa-quick-modal'); } catch(e){} }, 1200);
+        } catch (err) {
+            console.error('Failed to create ephemeral profile', err);
+            showNotification('Failed to create ephemeral profile', 'error');
+        }
+    } catch (err) {
+        console.error('rpa-run-selected-btn handler failed', err);
+        showNotification('RPA run failed', 'error');
+    }
+});
+
+// Close RPA quick modal cancel button
+safeOn('rpa-quick-cancel', 'click', () => {
+    try { hideModal('rpa-quick-modal'); const log = getEl('rpa-quick-log'); if (log) { log.style.display = 'none'; log.innerHTML = ''; } } catch(e){}
+});
+
+// End of file

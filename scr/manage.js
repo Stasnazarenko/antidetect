@@ -7,10 +7,12 @@ import path from 'path';
 import axios from 'axios';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
+import fs from 'fs';
 
 
 let pythonBridge = null;
 let active = {};
+let _bridgeWatcher = null;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,6 +32,23 @@ async function ensureBridge() {
         cwd: projectRoot,
         stdio: ['pipe', 'pipe', 'pipe']
     });
+
+    // Watch the bridge file and force-restart the bridge if file changes (useful during development)
+    try {
+        if (!_bridgeWatcher) {
+            _bridgeWatcher = () => {};
+            fs.watchFile(bridgePath, { interval: 1000 }, (curr, prev) => {
+                try {
+                    if (curr.mtimeMs !== prev.mtimeMs) {
+                        console.log(timeLog() + ' Detected change in camoufox_bridge.py, restarting bridge...');
+                        if (pythonBridge && !pythonBridge.killed) {
+                            try { pythonBridge.kill(); } catch (e) { console.warn('Failed to kill bridge after change', e); }
+                        }
+                    }
+                } catch (e) { console.error('bridge watch handler error', e); }
+            });
+        }
+    } catch (e) { console.warn('Failed to setup bridge file watcher', e); }
 
     // Wait for bridge to be ready
     await new Promise((resolve, reject) => {
@@ -56,6 +75,7 @@ async function ensureBridge() {
     pythonBridge.on('close', (code) => {
         console.log(timeLog() + ` Bridge exited (${code})`);
         pythonBridge = null;
+        try { fs.unwatchFile(path.join(path.resolve(__dirname, '..'), 'scr', 'camoufox_bridge.py')); } catch(e) {}
     });
 
     return pythonBridge;
