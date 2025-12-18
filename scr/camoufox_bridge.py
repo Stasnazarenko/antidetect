@@ -20,13 +20,6 @@ class BrowserManager:
         if os_type == "macos":
             mac_variants = [
                 {"cores": 8, "inner_w": 1440, "inner_h": 900, "outer_w": 1480, "outer_h": 980},
-                {"cores": 8, "inner_w": 1440, "inner_h": 932, "outer_w": 1480, "outer_h": 1012},
-                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1560, "outer_h": 1060},
-                {"cores": 12, "inner_w": 1512, "inner_h": 982, "outer_w": 1560, "outer_h": 1060},
-                {"cores": 14, "inner_w": 1728, "inner_h": 1117, "outer_w": 1780, "outer_h": 1200},
-                {"cores": 16, "inner_w": 1728, "inner_h": 1117, "outer_w": 1780, "outer_h": 1200},
-                {"cores": 10, "inner_w": 1920, "inner_h": 1080, "outer_w": 1980, "outer_h": 1160},
-                {"cores": 12, "inner_w": 1680, "inner_h": 1050, "outer_w": 1740, "outer_h": 1130},
             ]
             rm_mac_variants = [
                 # 1–2. MacBook Air 13" M1/M2/M3/M4 (роздільна здатність 2560×1600 @2x, масштабування "looks like 1440×900")
@@ -50,7 +43,7 @@ class BrowserManager:
                 {"cores": 16, "inner_w": 1920, "inner_h": 1200, "outer_w": 1920, "outer_h": 1269},
             ]
 
-            variant = random.choice(rm_mac_variants)
+            variant = random.choice(mac_variants)
 
             mac_arm_user_agents = [
                 # 1. M4 Pro MacBook Pro 14" – macOS 15.2
@@ -108,12 +101,7 @@ class BrowserManager:
             }
         else:  # windows
             windows_variants = [
-                {"cores": 8, "inner_w": 1920, "inner_h": 1080, "outer_w": 1920, "outer_h": 1120},
-                {"cores": 12, "inner_w": 1920, "inner_h": 1080, "outer_w": 1920, "outer_h": 1120},
-                {"cores": 12, "inner_w": 1920, "inner_h": 1080, "outer_w": 1980, "outer_h": 1160},
-                {"cores": 16, "inner_w": 2560, "inner_h": 1440, "outer_w": 2620, "outer_h": 1520},
-                {"cores": 10, "inner_w": 1536, "inner_h": 864, "outer_w": 1596, "outer_h": 944},
-                {"cores": 16, "inner_w": 2560, "inner_h": 1440, "outer_w": 2620, "outer_h": 1520},
+                {"cores": 8, "inner_w": 1440, "inner_h": 900, "outer_w": 1480, "outer_h": 980},
             ]
             variant = random.choice(windows_variants)
 
@@ -595,6 +583,13 @@ async def main():
                     "success": True,
                     "cleaned": cleaned
                 }) + "\n")
+                sys.stdout.flush()
+            elif action == 'rpa':
+                # action: rpa, profile: name, sequence: [{type, ...}], options: {}
+                seq = command.get('sequence', [])
+                opts = command.get('options', {})
+                result = await manager.execute_rpa_sequence(command.get('profile'), seq, opts)
+                sys.stdout.write(json.dumps(result) + "\n")
                 sys.stdout.flush()
             elif action == "shutdown":
                 for pname in list(manager.browsers.keys()):

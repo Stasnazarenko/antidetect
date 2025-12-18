@@ -705,4 +705,40 @@ async function launch_Ephemeral(options = {}) {
     });
 }
 
-export { create_Profile, open_Profile, close_Profile, active, set_ProfileProxy, launch_Ephemeral, delete_Profile, delete_ProfileProxy, change_ProfileFP, delete_ProfileFP, rename_Profile, cleanup_DeadBrowsers };
+async function run_RPA(profile, sequence = [], options = {}) {
+    console.log(timeLog() + ` Running RPA on profile ${profile} ...`);
+
+    const bridge = await ensureBridge();
+
+    const command = {
+        action: 'rpa',
+        profile: profile,
+        sequence: sequence || [],
+        options: options || {}
+    };
+
+    // send command
+    bridge.stdin.write(JSON.stringify(command) + '\n');
+
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('RPA execution timeout'));
+        }, 60000);
+
+        bridge.stdout.once('data', (data) => {
+            clearTimeout(timeout);
+            try {
+                const response = JSON.parse(data.toString());
+                if (response) {
+                    resolve(response);
+                } else {
+                    reject(new Error('Invalid RPA response'));
+                }
+            } catch (e) {
+                reject(new Error('Invalid response: ' + data.toString()));
+            }
+        });
+    });
+}
+
+export { create_Profile, open_Profile, close_Profile, active, set_ProfileProxy, launch_Ephemeral, delete_Profile, delete_ProfileProxy, change_ProfileFP, delete_ProfileFP, rename_Profile, cleanup_DeadBrowsers, run_RPA };

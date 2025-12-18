@@ -1414,3 +1414,134 @@ function restoreHeaderInteraction() {
         const modal = getEl('import-preview-modal'); if (modal) hideModal('import-preview-modal');
     });
 })();
+
+// RPA UI helpers
+async function loadRpaTemplates() {
+    try {
+        const resp = await fetch('/api/rpa/templates');
+        const data = await resp.json();
+        const sel = getEl('rpa-template-select');
+        const listDiv = getEl('rpa-templates-list');
+        if (sel) {
+            sel.innerHTML = '<option value="">(choose template)</option>';
+            if (data && Array.isArray(data.templates)) {
+                for (const t of data.templates) {
+                    const opt = document.createElement('option');
+                    opt.value = t.id;
+                    opt.textContent = t.name || t.id;
+                    sel.appendChild(opt);
+                }
+            }
+        }
+        if (listDiv) {
+            listDiv.innerHTML = '';
+            if (data && Array.isArray(data.templates)) {
+                for (const t of data.templates) {
+                    const node = document.createElement('div');
+                    node.className = 'rpa-template-item';
+                    node.style.padding = '8px';
+                    node.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+                    node.innerHTML = `<strong>${escapeHtml(t.name)}</strong><div style="font-size:12px;color:#9ca3af">${escapeHtml(t.id)}</div><div style="margin-top:6px"><button class="btn btn-sm btn-primary rpa-edit-template" data-id="${t.id}">Edit</button> <button class="btn btn-sm btn-danger rpa-delete-template" data-id="${t.id}">Delete</button></div>`;
+                    listDiv.appendChild(node);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load RPA templates', e);
+    }
+}
+
+// Open quick-run modal for current selection
+function openRpaQuickModal() {
+    const modal = getEl('rpa-quick-modal');
+    if (!modal) return;
+    const selectedCount = selectedProfiles.size;
+    const countEl = getEl('rpa-selected-count'); if (countEl) countEl.textContent = selectedCount;
+
+    // populate templates
+    loadRpaTemplates();
+    showModal('rpa-quick-modal');
+}
+
+// Run selected template on selected profiles (batch with random stagger)
+async function runRpaOnSelected() {
+    const sel = getEl('rpa-template-select');
+    if (!sel || !sel.value) { showNotification('Choose a template first', 'error'); return; }
+    const tplId = sel.value;
+
+    // fetch template details
+    const resp = await fetch(`/api/rpa/templates/${encodeURIComponent(tplId)}`);
+    const tpl = await resp.json();
+    if (!tpl || !tpl.success || !tpl.template) { showNotification('Failed to load template', 'error'); return; }
+    const sequence = tpl.template.sequence || [];
+
+    const profilesToRun = Array.from(selectedProfiles);
+    if (profilesToRun.length === 0) { showNotification('No profiles selected', 'error'); return; }
+
+    const logDiv = getEl('rpa-quick-log'); if (logDiv) { logDiv.style.display = 'block'; logDiv.innerHTML = ''; }
+
+    for (let i = 0; i < profilesToRun.length; i++) {
+        const p = profilesToRun[i];
+        // stagger: base 800ms + random gaussian-ish jitter
+        const delayMs = 800 * i + Math.round(Math.random() * 1200);
+        setTimeout(async () => {
+            try {
+                appendRpaLog(`Starting on ${p} ...`);
+                const resp2 = await fetch('/api/rpa/execute', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ profile: p, sequence: sequence, options: {} }) });
+                const data = await resp2.json();
+                if (data && data.success) {
+                    appendRpaLog(`✅ ${p}: success`);
+                } else {
+                    appendRpaLog(`❌ ${p}: ${data && (data.error || data.message) ? (data.error || data.message) : 'failed'}`);
+                }
+            } catch (e) {
+                appendRpaLog(`❌ ${p}: ${e && e.message ? e.message : String(e)}`);
+            }
+        }, delayMs);
+    }
+
+    // hide modal after all scheduled (approx)
+    setTimeout(() => { try { hideModal('rpa-quick-modal'); } catch(e){} }, 800 * profilesToRun.length + 4000);
+}
+
+function appendRpaLog(msg) {
+    const logDiv = getEl('rpa-quick-log');
+    if (!logDiv) return;
+    const p = document.createElement('div'); p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    logDiv.appendChild(p);
+    logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+// Attach small delegation for RPA manager template items
+document.addEventListener('click', async (ev) => {
+    const edit = ev.target.closest('.rpa-edit-template');
+    const del = ev.target.closest('.rpa-delete-template');
+    if (edit) {
+        ev.preventDefault(); ev.stopPropagation();
+        const id = edit.getAttribute('data-id');
+        // open manager modal and focus edit (for now simply open modal and load templates)
+        showModal('rpa-modal');
+        await loadRpaTemplates();
+        return;
+    }
+    if (del) {
+        ev.preventDefault(); ev.stopPropagation();
+        const id = del.getAttribute('data-id');
+        if (!confirm('Delete template?')) return;
+        try {
+            const resp = await fetch(`/api/rpa/templates/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            const j = await resp.json();
+            if (j && j.success) { showNotification('Template deleted', 'success'); loadRpaTemplates(); }
+            else showNotification('Failed to delete template', 'error');
+        } catch (e) { showNotification('Delete failed', 'error'); }
+        return;
+    }
+});
+
+// safeOn handlers to wire buttons
+safeOn('open-rpa-quick-btn', 'click', (e) => { e.preventDefault(); e.stopPropagation(); openRpaQuickModal(); });
+safeOn('open-rpa-manager-btn', 'click', (e) => { e.preventDefault(); e.stopPropagation(); showModal('rpa-modal'); loadRpaTemplates(); });
+safeOn('rpa-quick-cancel', 'click', () => { hideModal('rpa-quick-modal'); });
+safeOn('rpa-modal-close', 'click', () => { hideModal('rpa-modal'); });
+safeOn('rpa-run-selected-btn', 'click', async () => { await runRpaOnSelected(); });
+

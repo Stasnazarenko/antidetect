@@ -809,3 +809,134 @@ app.post('/api/profiles/import', async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 });
+
+// RPA templates and runs storage
+const rpaTemplatesPath = path.join(__dirname, 'storage', 'rpa_templates.json');
+const rpaRunsPath = path.join(__dirname, 'storage', 'rpa_runs.json');
+
+function readRpaTemplates() {
+    if (!fs.existsSync(rpaTemplatesPath)) return [];
+    try { return JSON.parse(fs.readFileSync(rpaTemplatesPath, 'utf8')) || []; } catch (e) { return []; }
+}
+function writeRpaTemplates(list) { fs.writeFileSync(rpaTemplatesPath, JSON.stringify(list, null, 2)); }
+
+function readRpaRuns() {
+    if (!fs.existsSync(rpaRunsPath)) return [];
+    try { return JSON.parse(fs.readFileSync(rpaRunsPath, 'utf8')) || []; } catch (e) { return []; }
+}
+function writeRpaRuns(list) { fs.writeFileSync(rpaRunsPath, JSON.stringify(list, null, 2)); }
+
+// GET list of templates
+app.get('/api/rpa/templates', async (req, res) => {
+    try {
+        const list = readRpaTemplates();
+        res.json({ success: true, templates: list });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// GET single template
+app.get('/api/rpa/templates/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        const list = readRpaTemplates();
+        const found = list.find(t => t.id === id);
+        if (!found) return res.status(404).json({ success: false, error: 'Template not found' });
+        res.json({ success: true, template: found });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// POST create/update template
+app.post('/api/rpa/templates', async (req, res) => {
+    try {
+        const body = req.body || {};
+        if (!body.name || !Array.isArray(body.sequence)) return res.status(400).json({ success: false, error: 'name and sequence required' });
+        const list = readRpaTemplates();
+        const id = body.id || (Date.now().toString() + '_' + Math.random().toString(36).slice(2,8));
+        const now = new Date().toISOString();
+        const tpl = { id, name: body.name, sequence: body.sequence, createdAt: now, updatedAt: now };
+        // replace if exists
+        const idx = list.findIndex(t => t.id === id);
+        if (idx === -1) list.push(tpl); else list[idx] = Object.assign({}, list[idx], tpl);
+        writeRpaTemplates(list);
+        res.json({ success: true, template: tpl });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// DELETE template
+app.delete('/api/rpa/templates/:id', async (req, res) => {
+    try {
+        const id = req.params.id;
+        let list = readRpaTemplates();
+        const before = list.length;
+        list = list.filter(t => t.id !== id);
+        writeRpaTemplates(list);
+        res.json({ success: true, deleted: before - list.length });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// GET rpa runs
+app.get('/api/rpa/runs', async (req, res) => {
+    try {
+        const list = readRpaRuns();
+        res.json({ success: true, runs: list });
+    } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Update execute endpoint to persist runs
+// (patch existing handler) - wrap manage.run_RPA call to save run
+app.post('/api/rpa/execute', async (req, res) => {
+    try {
+        const { profile, sequence, options } = req.body || {};
+        if (!profile || !Array.isArray(sequence)) {
+            return res.status(400).json({ success: false, error: 'Invalid payload: profile (string) and sequence (array) required' });
+        }
+
+        if (!manage || !manage.run_RPA) {
+            return res.status(500).json({ success: false, error: 'RPA runner not available on server' });
+        }
+
+        const start = Date.now();
+        let result;
+        try {
+            result = await manage.run_RPA(profile, sequence, options || {});
+        } catch (e) {
+            result = { success: false, error: String(e && e.message ? e.message : e) };
+        }
+        const end = Date.now();
+
+        // Persist run
+        try {
+            const runs = readRpaRuns();
+            const runItem = {
+                id: Date.now().toString() + '_' + Math.random().toString(36).slice(2,8),
+                profile: profile,
+                success: !!(result && result.success),
+                error: result && result.error ? result.error : null,
+                sequence: JSON.stringify(sequence),
+                options: options || {},
+                durationMs: end - start,
+                timestamp: new Date().toISOString()
+            };
+            runs.unshift(runItem);
+            // keep last 500 runs to avoid disk bloat
+            if (runs.length > 500) runs.length = 500;
+            writeRpaRuns(runs);
+            io.emit('rpa_runs_updated');
+        } catch (e) {
+            console.error('Failed to persist RPA run', e);
+        }
+
+        res.json({ success: true, result });
+    } catch (error) {
+        console.error('[API] Error executing RPA (outer):', error && error.stack ? error.stack : error);
+        res.status(500).json({ success: false, error: String(error && error.message ? error.message : error) });
+    }
+});
+
+// END additional RPA endpoints

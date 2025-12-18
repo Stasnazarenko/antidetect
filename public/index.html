@@ -39,6 +39,8 @@
             </div>
 
             <button id="open-proxy-manager-btn" class="btn btn-primary" type="button">🌐 Proxy Manager</button>
+            <button id="open-rpa-manager-btn" class="btn btn-primary" type="button">🤖 RPA Manager</button>
+            <button id="open-rpa-quick-btn" class="btn btn-success" type="button">⚡ RPA</button>
 
             <!-- Advanced dropdown: move Cleanup here -->
             <div class="dropdown" id="advanced-dropdown">
@@ -185,6 +187,43 @@
                 <button id="ephemeral-cancel-btn" class="btn">Cancel</button>
             </div>
             <div id="ephemeral-result" style="margin-top:12px; display:none;"></div>
+        </div>
+    </div>
+
+    <!-- RPA Quick Run Modal -->
+    <div id="rpa-quick-modal" class="modal">
+        <div class="modal-content modal-large">
+            <span class="close">&times;</span>
+            <h2>Run RPA on selected profiles</h2>
+            <div style="margin-top:8px;">
+                <label>Template</label>
+                <select id="rpa-template-select" style="width:100%; padding:8px; border-radius:6px; border:1px solid #e2e8f0; margin-bottom:8px;">
+                    <option value="">(choose template)</option>
+                </select>
+            </div>
+            <div id="rpa-quick-selected" style="margin-top:8px; color:#718096;">Selected profiles: <span id="rpa-selected-count">0</span></div>
+            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
+                <button id="rpa-run-selected-btn" class="btn btn-success">Run on selected</button>
+                <button id="rpa-run-single-btn" class="btn btn-secondary" style="display:none">Run on single</button>
+                <button id="rpa-quick-cancel" class="btn">Cancel</button>
+            </div>
+            <div id="rpa-quick-log" style="margin-top:12px; max-height:240px; overflow:auto; background:#0f172a; color:#e2e8f0; padding:8px; border-radius:6px; display:none;"></div>
+        </div>
+    </div>
+
+    <!-- RPA Manager Modal -->
+    <div id="rpa-modal" class="modal">
+        <div class="modal-content modal-large">
+            <span class="close">&times;</span>
+            <h2>RPA Manager - Templates</h2>
+            <div style="display:flex; gap:10px; margin-top:8px;">
+                <button id="rpa-new-template-btn" class="btn btn-success">New</button>
+                <button id="rpa-refresh-templates-btn" class="btn btn-secondary">Refresh</button>
+            </div>
+            <div id="rpa-templates-list" style="margin-top:12px; max-height:320px; overflow:auto;"></div>
+            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
+                <button id="rpa-modal-close" class="btn">Close</button>
+            </div>
         </div>
     </div>
 
