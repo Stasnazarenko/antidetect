@@ -998,8 +998,9 @@ async function processRpaQueue() {
         const { profile, sequence, options, resolve, reject } = job;
         try {
             console.log('[RPA_QUEUE] processing', profile);
-            // ensure profile is marked open in DB / manage.active
-            let ready = false;
+            console.log(new Date().toISOString(), `[RPA_QUEUE] dequeued job for ${profile}`);
+             // ensure profile is marked open in DB / manage.active
+             let ready = false;
 
             // First, try a fast bridge probe: if the bridge already has this profile open, mark active immediately
             try {
@@ -1050,16 +1051,20 @@ async function processRpaQueue() {
             }
 
             // run RPA
+            console.log(new Date().toISOString(), `[RPA_QUEUE] invoking manage.run_RPA for ${profile}`);
+            const runStart = Date.now();
             const res = await manage.run_RPA(profile, sequence, options || {});
-            // persist run (best-effort)
-            try {
-                const runs = readRpaRuns();
-                const runItem = { id: Date.now().toString() + '_' + Math.random().toString(36).slice(2,8), profile: profile, success: !!(res && res.success), error: res && (res.error || (res.result && res.result.error)) ? (res.error || res.result.error) : null, sequence: JSON.stringify(sequence), options: options || {}, durationMs: 0, timestamp: new Date().toISOString() };
-                runs.unshift(runItem);
-                if (runs.length > 500) runs.length = 500;
-                writeRpaRuns(runs);
-                io.emit('rpa_runs_updated');
-            } catch (e) { console.error('[RPA_QUEUE] failed to persist run', e); }
+            const runDur = Date.now() - runStart;
+            console.log(new Date().toISOString(), `[RPA_QUEUE] manage.run_RPA for ${profile} returned in ${runDur}ms`);
+             // persist run (best-effort)
+             try {
+                 const runs = readRpaRuns();
+                 const runItem = { id: Date.now().toString() + '_' + Math.random().toString(36).slice(2,8), profile: profile, success: !!(res && res.success), error: res && (res.error || (res.result && res.result.error)) ? (res.error || res.result.error) : null, sequence: JSON.stringify(sequence), options: options || {}, durationMs: 0, timestamp: new Date().toISOString() };
+                 runs.unshift(runItem);
+                 if (runs.length > 500) runs.length = 500;
+                 writeRpaRuns(runs);
+                 io.emit('rpa_runs_updated');
+             } catch (e) { console.error('[RPA_QUEUE] failed to persist run', e); }
 
             resolve(res);
         } catch (e) {
