@@ -219,7 +219,25 @@
             <div style="display:flex; gap:10px; margin-top:8px;">
                 <button id="rpa-new-template-btn" class="btn btn-success">New</button>
                 <button id="rpa-refresh-templates-btn" class="btn btn-secondary">Refresh</button>
+                <button id="rpa-view-runs-btn" class="btn btn-outline">View Runs</button>
             </div>
+
+            <div id="rpa-editor" style="margin-top:12px; display:none;">
+                <h3 id="rpa-editor-title">New Template</h3>
+                <input type="hidden" id="rpa-editor-id" />
+                <input id="rpa-editor-name" placeholder="Template name" style="width:100%; padding:8px; margin-bottom:8px;" />
+                <textarea id="rpa-editor-seq" placeholder='[ { "type": "open_url", "url": "https://example.com" } ]' style="width:100%; height:140px; padding:8px; font-family:monospace;"></textarea>
+                <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">
+                    <button id="rpa-template-save-btn" class="btn btn-success">Save</button>
+                    <button id="rpa-template-cancel-btn" class="btn">Cancel</button>
+                </div>
+            </div>
+
+            <div id="rpa-runs-modal" style="display:none; margin-top:12px;">
+                <h3>Recent Runs</h3>
+                <div id="rpa-runs-list" style="max-height:240px; overflow:auto; background:#071018; color:#d1fae5; padding:8px; border-radius:6px;"></div>
+            </div>
+
             <div id="rpa-templates-list" style="margin-top:12px; max-height:320px; overflow:auto;"></div>
             <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px;">
                 <button id="rpa-modal-close" class="btn">Close</button>
