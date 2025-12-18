@@ -19,80 +19,44 @@ class BrowserManager:
         """Генерує конфігурацію фінгерпринту для вказаної ОС"""
         if os_type == "macos":
             mac_variants = [
-                {"cores": 8, "inner_w": 1440, "inner_h": 900, "outer_w": 1480, "outer_h": 980},
+                {"cores": 8, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
             ]
             rm_mac_variants = [
                 # 1–2. MacBook Air 13" M1/M2/M3/M4 (роздільна здатність 2560×1600 @2x, масштабування "looks like 1440×900")
-                {"cores": 8,  "inner_w": 1440, "inner_h": 900, "outer_w": 1440, "outer_h": 969},   # dock зверху/знизу
-                {"cores": 10, "inner_w": 1440, "inner_h": 900, "outer_w": 1440, "outer_h": 969},
+                {"cores": 8,  "inner_w": 1512, "inner_h": 982, "outer_w": 1440, "outer_h": 982},   # dock зверху/знизу
+                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1440, "outer_h": 982},
 
                 # 3–4. MacBook Air 15" M2/M3/M4 (2880×1864 @2x → looks like 1512×982)
-                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 1051},
-                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 1062},
+                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
+                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
 
                 # 5–8. MacBook Pro 14" M1–M4 Pro/Max (3024×1964 @2x → looks like 1512×982 або 1728×1117)
-                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 1051},   # default scaling
-                {"cores": 12, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 1051},
-                {"cores": 12, "inner_w": 1728, "inner_h": 1117, "outer_w": 1728, "outer_h": 1186},  # "more space"
-                {"cores": 14, "inner_w": 1728, "inner_h": 1117, "outer_w": 1728, "outer_h": 1186},
+                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},   # default scaling
+                {"cores": 12, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
+                {"cores": 12, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},  # "more space"
+                {"cores": 14, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
 
                 # 9–12. MacBook Pro 16" M1–M4 Pro/Max (3456×2234 @2x → looks like 1728×1117 або 1920×1200)
-                {"cores": 10, "inner_w": 1728, "inner_h": 1117, "outer_w": 1728, "outer_h": 1186},
-                {"cores": 12, "inner_w": 1728, "inner_h": 1117, "outer_w": 1728, "outer_h": 1186},
-                {"cores": 14, "inner_w": 1920, "inner_h": 1200, "outer_w": 1920, "outer_h": 1269},   # "more space"
-                {"cores": 16, "inner_w": 1920, "inner_h": 1200, "outer_w": 1920, "outer_h": 1269},
+                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
+                {"cores": 12, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
+                {"cores": 14, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},   # "more space"
+                {"cores": 16, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
             ]
 
             variant = random.choice(mac_variants)
-
-            mac_arm_user_agents = [
-                # 1. M4 Pro MacBook Pro 14" – macOS 15.2
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
-
-                # 2. M4 Pro MacBook Pro 16" – macOS 15.2
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
-
-                # 3. M3 Max MacBook Pro 16" – macOS 15.1
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
-
-                # 4. M2 Pro MacBook Pro 14" – macOS 15.2
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/145.0",
-
-                # 5. M4 MacBook Air 15" – macOS 15.2
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
-
-                # 6. M3 Pro MacBook Pro 14" – macOS 15.1
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
-
-                # 7. M1 Max MacBook Pro 16" – macOS 15.2
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/145.0",
-
-                # 8. M4 Pro iMac 24" – macOS 15.2
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
-
-                # 9. M2 Mac mini – macOS 15.1
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
-
-                # 10. M4 Max MacBook Pro 16" – macOS 15.2
-                "Mozilla/5.0 (Macintosh; ARM Mac OS X 15_2) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0",
-            ]
-
-            # Приклад випадкового вибору
-            random_user_agent = random.choice(mac_arm_user_agents)
-
+            # 'navigator.language': 'en-US',
+            # 'navigator.languages': ['en-US', 'en'],
             return {
                 'window.outerHeight': variant["outer_h"],
                 'window.outerWidth': variant["outer_w"],
                 'window.innerHeight': variant["inner_h"],
                 'window.innerWidth': variant["inner_w"],
                 'window.history.length': random.randint(2, 20),
-                'navigator.userAgent': random_user_agent,
+                'navigator.userAgent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0',
                 'navigator.appCodeName': 'Mozilla',
                 'navigator.appName': 'Netscape',
                 'navigator.appVersion': '5.0 (Macintosh)',
-                'navigator.oscpu': 'Intel Mac OS X 10.15',
-                'navigator.language': 'en-US',
-                'navigator.languages': ['en-US', 'en'],
+                'navigator.oscpu': 'Intel Mac OS X 10_15_7',
                 'navigator.platform': 'MacIntel',
                 'navigator.hardwareConcurrency': variant["cores"],
                 'navigator.product': 'Gecko',
@@ -101,24 +65,32 @@ class BrowserManager:
             }
         else:  # windows
             windows_variants = [
-                {"cores": 8, "inner_w": 1440, "inner_h": 900, "outer_w": 1480, "outer_h": 980},
+                {"cores": 8, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
+                # Близькі до твого 1512x982 — ти бачиш майже те саме, але fingerprint різний
+                {"cores": 10, "outer_w": 1512, "outer_h": 982, "inner_w": 1512, "inner_h": 982},
+                {"cores": 8,  "outer_w": 1520, "outer_h": 980, "inner_w": 1504, "inner_h": 966},
+                {"cores": 12, "outer_w": 1500, "outer_h": 990, "inner_w": 1484, "inner_h": 976},
+                {"cores": 10, "outer_w": 1536, "outer_h": 970, "inner_w": 1520, "inner_h": 956},
+                {"cores": 8,  "outer_w": 1490, "outer_h": 1000,"inner_w": 1474, "inner_h": 986},
+                {"cores": 12, "outer_w": 1510, "outer_h": 985, "inner_w": 1494, "inner_h": 971},
+                {"cores": 10, "outer_w": 1528, "outer_h": 978, "inner_w": 1512, "inner_h": 964},
+                {"cores": 14, "outer_w": 1508, "outer_h": 992, "inner_w": 1492, "inner_h": 978}
             ]
             variant = random.choice(windows_variants)
-
+            # 'navigator.language': 'en-US',
+            # 'navigator.languages': ['en-US'],
             return {
                 'window.outerHeight': variant["outer_h"],
                 'window.outerWidth': variant["outer_w"],
                 'window.innerHeight': variant["inner_h"],
                 'window.innerWidth': variant["inner_w"],
                 'window.history.length': random.randint(3, 40),
-                'navigator.userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+                'navigator.userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0',
                 'navigator.appCodeName': 'Mozilla',
                 'navigator.appName': 'Netscape',
-                'navigator.appVersion': '5.0 (Windows)',
+                'navigator.appVersion': '5.0 (Windows NT 10.0; Win64; x64)',
                 'navigator.oscpu': 'Windows NT 10.0; Win64; x64',
-                'navigator.language': 'en-US',
-                'navigator.languages': ['en-US'],
-                'navigator.platform': 'Win32',
+                'navigator.platform': 'Win64',
                 'navigator.hardwareConcurrency': variant["cores"],
                 'navigator.product': 'Gecko',
                 'navigator.productSub': '20030107',
