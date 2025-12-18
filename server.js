@@ -906,6 +906,10 @@ app.post('/api/rpa/execute', async (req, res) => {
 // Simple FIFO queue to serialize profile openings and RPA jobs
 const openQueue = [];
 let openProcessing = false;
+// track profiles currently enqueued/opening to allow RPA to wait on them
+const openingProfiles = new Set();
+const openWaiters = new Map(); // profile -> array of {resolve,reject}
+
 async function processOpenQueue() {
     if (openProcessing) return;
     openProcessing = true;
@@ -919,9 +923,27 @@ async function processOpenQueue() {
             // small delay to let bridge/db sync
             await new Promise(rp => setTimeout(rp, 200));
             io.emit('profile_opened', { name });
+            // notify any waiters
+            openingProfiles.delete(name);
+            if (openWaiters.has(name)) {
+                const arr = openWaiters.get(name) || [];
+                for (const w of arr) {
+                    try { w.resolve({ success: true }); } catch (e) {}
+                }
+                openWaiters.delete(name);
+            }
             resolve({ success: true });
         } catch (e) {
             console.error('[OPEN_QUEUE] failed to open', name, e && e.message ? e.message : e);
+            // notify waiters about failure
+            openingProfiles.delete(name);
+            if (openWaiters.has(name)) {
+                const arr = openWaiters.get(name) || [];
+                for (const w of arr) {
+                    try { w.reject(e); } catch (ee) {}
+                }
+                openWaiters.delete(name);
+            }
             reject(e);
         }
         // throttle between opens
@@ -931,11 +953,41 @@ async function processOpenQueue() {
 }
 function enqueueOpenProfile(name) {
     return new Promise((resolve, reject) => {
+        // mark profile as pending open
+        openingProfiles.add(name);
         openQueue.push({ name, resolve, reject });
         processOpenQueue().catch(err => console.error('[OPEN_QUEUE] processor error', err));
     });
 }
 
+function waitForProfileOpen(name, timeoutMs = 5000) {
+    return new Promise((resolve, reject) => {
+        // immediate success if manage says active
+        try {
+            if (manage && manage.active && manage.active[name]) return resolve({ success: true });
+        } catch (e) {}
+        // if not currently opening and not active, resolve false quickly
+        if (!openingProfiles.has(name)) return resolve({ success: false });
+        // otherwise register waiter
+        const arr = openWaiters.get(name) || [];
+        arr.push({ resolve, reject });
+        openWaiters.set(name, arr);
+        // timeout
+        const to = setTimeout(() => {
+            // remove this waiter
+            const cur = openWaiters.get(name) || [];
+            openWaiters.set(name, cur.filter(w => w.resolve !== resolve));
+            reject(new Error('waitForProfileOpen timeout'));
+        }, timeoutMs);
+        // wrap resolve/reject to clear timeout
+        const origResolve = resolve;
+        const origReject = reject;
+        resolve = (v) => { clearTimeout(to); try { origResolve(v); } catch(e){} };
+        reject = (e) => { clearTimeout(to); try { origReject(e); } catch(e){} };
+    });
+}
+
+// RPA queue
 const rpaQueue = [];
 let rpaProcessing = false;
 async function processRpaQueue() {
@@ -947,25 +999,37 @@ async function processRpaQueue() {
         try {
             console.log('[RPA_QUEUE] processing', profile);
             // ensure profile is marked open in DB / manage.active
-            const startWait = Date.now();
-            const waitTimeout = 15000;
             let ready = false;
-            while ((Date.now() - startWait) < waitTimeout) {
+
+            // If profile is currently being opened via the openQueue, wait for that specific open (fast)
+            if (openingProfiles.has(profile)) {
                 try {
-                    // check manage.active as quick guard
-                    if (manage && manage.active && manage.active[profile]) { ready = true; break; }
-                    // try asking bridge via manage.checkProfileInBridge if available
-                    if (manage && typeof manage.checkProfileInBridge === 'function') {
-                        const br = await manage.checkProfileInBridge(profile, 1000).catch(() => null);
-                        if (br) { ready = true; break; }
-                    }
+                    await waitForProfileOpen(profile, 5000).catch(() => null);
+                    if (manage && manage.active && manage.active[profile]) ready = true;
                 } catch (e) {}
-                await new Promise(rp => setTimeout(rp, 250));
             }
+
+            if (!ready) {
+                const startWait = Date.now();
+                const waitTimeout = 5000; // reduce overall wait
+                while ((Date.now() - startWait) < waitTimeout) {
+                    try {
+                        // quick guard: check manage.active
+                        if (manage && manage.active && manage.active[profile]) { ready = true; break; }
+                        // ask bridge via manage.checkProfileInBridge if available (shorter timeout)
+                        if (manage && typeof manage.checkProfileInBridge === 'function') {
+                            const br = await manage.checkProfileInBridge(profile, 500).catch(() => null);
+                            if (br) { ready = true; break; }
+                        }
+                    } catch (e) {}
+                    await new Promise(rp => setTimeout(rp, 150));
+                }
+            }
+
             if (!ready) {
                 console.warn('[RPA_QUEUE] profile not ready in bridge/db before RPA:', profile);
-                // attempt to open via manage.open_Profile as last resort
-                try { await manage.open_Profile(profile); await new Promise(rp => setTimeout(rp, 500)); } catch (e) { /* ignore */ }
+                // attempt to open via manage.open_Profile as last resort (but short)
+                try { await manage.open_Profile(profile); await new Promise(rp => setTimeout(rp, 300)); } catch (e) { /* ignore */ }
             }
 
             // run RPA

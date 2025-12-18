@@ -553,7 +553,21 @@ class BrowserManager:
                         if not url:
                             results.append({"index": idx, "type": typ, "success": False, "error": "missing url"})
                             return {"success": False, "results": results, "error": f"missing url at step {idx}"}
-                        await page.goto(url, wait_until='networkidle')
+                        # navigation: allow step-level and options-level overrides
+                        # default to 'domcontentloaded' to avoid long waits for all resources
+                        waitUntil = step.get('waitUntil') or options.get('navigationWait') if options and isinstance(options, dict) else None
+                        if not waitUntil: waitUntil = 'domcontentloaded'
+                        # per-step timeout in ms (default 10s)
+                        try:
+                            navTimeout = int(step.get('timeout') or (options and options.get('navigationTimeout')) or 10000)
+                        except Exception:
+                            navTimeout = 10000
+                        try:
+                            await page.goto(url, wait_until=waitUntil, timeout=navTimeout)
+                        except Exception as e:
+                            # navigation may fail or timeout; include error and continue/return
+                            results.append({"index": idx, "type": typ, "success": False, "error": str(e)})
+                            return {"success": False, "results": results, "error": f"navigation failed at step {idx}: {e}"}
                         results.append({"index": idx, "type": typ, "success": True, "url": url})
                         # optional delay in milliseconds
                         delay = int(step.get('delay') or 0)
