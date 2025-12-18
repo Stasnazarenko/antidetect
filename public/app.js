@@ -107,6 +107,20 @@ async function loadProfiles() {
         if (data.success) {
             profiles = data.profiles;
             console.log('[UI] Loaded profiles:', profiles.length);
+
+            // Keep any selected profile names that still exist on the server (preserve open selection)
+            try {
+                const keep = new Set();
+                for (const name of selectedProfiles) {
+                    const p = profiles.find(x => x.name === name);
+                    if (p) keep.add(name);
+                }
+                selectedProfiles = keep;
+            } catch (e) {
+                // if anything goes wrong, do not clear selection to avoid surprising UX
+                console.warn('Failed to sanitize selectedProfiles, leaving as-is', e);
+            }
+
             updateStats();
             renderProfiles();
         }
@@ -170,16 +184,18 @@ function renderProfiles() {
         const safeName = escapeHtml(profile.name);
         const encName = encodeURIComponent(profile.name);
 
+        // Render checkbox for all profiles (open or closed) so user can select open profiles (for closing, etc.)
+        const checkboxHtml = `<input type="checkbox" class="profile-checkbox" data-profile="${encName}" ${isSelected ? 'checked' : ''}>`;
+        const cardClass = `profile-card ${isSelected ? 'selected' : ''} ${profile.open ? 'is-open' : ''}`;
+
         return `
-        <div class="profile-card ${isSelected ? 'selected' : ''}" data-profile="${encName}">
-            <input type="checkbox" class="profile-checkbox" 
-                   data-profile="${encName}"
-                   ${isSelected ? 'checked' : ''}>
-            
+        <div class="${cardClass}" data-profile="${encName}">
+            ${checkboxHtml}
+
             <div class="profile-avatar" style="background: ${avatar.color}">
                 ${escapeHtml(avatar.initial)}
             </div>
-            
+
             <div class="profile-header">
                 <div class="profile-name">${safeName}</div>
                 <div class="profile-status ${profile.open ? 'status-open' : 'status-closed'}">
@@ -260,6 +276,7 @@ function attachProfilesGridDelegation() {
                 const raw = card.getAttribute('data-profile');
                 const name = raw ? decodeURIComponent(raw) : null;
                 if (name) {
+                    // allow toggling selection even for open profiles (user may want to close them)
                     if (selectedProfiles.has(name)) selectedProfiles.delete(name); else selectedProfiles.add(name);
                     renderProfiles();
                 }
@@ -271,6 +288,7 @@ function attachProfilesGridDelegation() {
             const raw = checkbox.getAttribute('data-profile');
             const name = raw ? decodeURIComponent(raw) : null;
             if (!name) return;
+            // allow selecting open profiles as well
             if (checkbox.checked) selectedProfiles.add(name); else selectedProfiles.delete(name);
             renderProfiles();
             return;
@@ -401,7 +419,7 @@ const bulkOpenBtn = getEl('bulk-open-btn'); if (bulkOpenBtn) bulkOpenBtn.addEven
 const bulkCloseBtn = getEl('bulk-close-btn'); if (bulkCloseBtn) bulkCloseBtn.addEventListener('click', () => bulkAction('close'));
 const bulkDeleteBtn = getEl('bulk-delete-btn'); if (bulkDeleteBtn) bulkDeleteBtn.addEventListener('click', () => bulkAction('delete'));
 const deselectAllBtn = getEl('deselect-all-btn'); if (deselectAllBtn) deselectAllBtn.addEventListener('click', () => { selectedProfiles.clear(); renderProfiles(); });
-const selectAllBtn = getEl('select-all-btn'); if (selectAllBtn) selectAllBtn.addEventListener('click', () => { profiles.forEach(p=>selectedProfiles.add(p.name)); renderProfiles(); });
+const selectAllBtn = getEl('select-all-btn'); if (selectAllBtn) selectAllBtn.addEventListener('click', () => { profiles.forEach(p=>{ selectedProfiles.add(p.name); }); renderProfiles(); });
 
 // Bulk select functions
 function toggleSelect(name, event) {
@@ -424,6 +442,26 @@ function updateBulkActions() {
         bulkActionsDiv.style.display = 'flex';
     } else {
         bulkActionsDiv.style.display = 'none';
+    }
+
+    // Keep RPA modal controls in sync with current selection
+    try { updateRpaEphemeralState(); } catch (e) { /* ignore */ }
+}
+
+// New helper: enable/disable ephemeral checkbox in RPA modal depending on selection
+function updateRpaEphemeralState() {
+    const cb = getEl('rpa-use-ephemeral');
+    const info = getEl('rpa-ephemeral-note');
+    if (!cb) return;
+
+    if (selectedProfiles.size > 0) {
+        cb.disabled = true;
+        // if there's a small note element, show a tooltip-like message
+        if (info) info.textContent = 'Disabled when profiles are selected';
+        cb.checked = false; // ensure unchecked when disabled so handler won't try to use ephemeral
+    } else {
+        cb.disabled = false;
+        if (info) info.textContent = '';
     }
 }
 
@@ -1461,6 +1499,9 @@ function openRpaQuickModal() {
 
     // populate templates
     loadRpaTemplates();
+    // Ensure ephemeral checkbox state reflects current selection
+    try { updateRpaEphemeralState(); } catch (e) {}
+
     showModal('rpa-quick-modal');
 }
 
@@ -1470,26 +1511,44 @@ async function runRpaOnSelected() {
     if (!sel || !sel.value) { showNotification('Choose a template first', 'error'); return; }
     const tplId = sel.value;
 
-    console.debug('[RPA] runRpaOnSelected called, tplId=', tplId, 'selectedProfiles=', Array.from(selectedProfiles));
-
-    // find template in cache
+    // ensure we have templates loaded and get sequence
     let tpl = rpaTemplatesCache.find(t => t.id === tplId);
     if (!tpl) {
-        // attempt to reload cache
         await loadRpaTemplates();
         tpl = rpaTemplatesCache.find(t => t.id === tplId);
     }
-
     if (!tpl) { showNotification('Template not found', 'error'); return; }
     const sequence = tpl.sequence || [];
 
-    const profilesToRun = Array.from(selectedProfiles);
-    if (profilesToRun.length === 0) { showNotification('No profiles selected', 'error'); return; }
+    // Only closed profiles are valid RPA targets — filter selectedProfiles accordingly
+    const allSelected = Array.from(selectedProfiles);
+    const validTargets = [];
+    const skipped = [];
+    for (const name of allSelected) {
+        const p = profiles.find(x => x.name === name);
+        if (!p) { skipped.push(name); continue; }
+        if (p.open) skipped.push(name); else validTargets.push(name);
+    }
+
+    if (skipped.length > 0) {
+        const shown = skipped.slice(0,5).join(', ');
+        showNotification(`Skipping ${skipped.length} open/unavailable profile(s): ${shown}${skipped.length>5?', ...':''}`, 'info');
+    }
+
+    if (validTargets.length === 0) {
+        showNotification('No closed profiles selected for RPA (open profiles are skipped).', 'error');
+        return;
+    }
+
+    // proceed with RPA on validTargets (keep original logic but use validTargets)
+    const profilesToRun = validTargets;
 
     const logDiv = getEl('rpa-quick-log'); if (logDiv) { logDiv.style.display = 'block'; logDiv.innerHTML = ''; }
 
     for (let i = 0; i < profilesToRun.length; i++) {
         const p = profilesToRun[i];
+        // remove from selection immediately to avoid stale selection when profile becomes open
+        try { selectedProfiles.delete(p); renderProfiles(); } catch (e) { /* ignore */ }
         const delayMs = 800 * i + Math.round(Math.random() * 1200);
         setTimeout(async () => {
             try {
@@ -1507,6 +1566,10 @@ async function runRpaOnSelected() {
                     const errMsg = (runner && runner.error) ? runner.error : (data && (data.error || data.message)) ? (data.error || data.message) : 'failed';
                     appendRpaLog(`❌ ${p}: ${errMsg}`);
                 }
+
+                // Refresh profiles immediately so UI reflects opened profiles and selectedProfiles is sanitized
+                try { await loadProfiles(); } catch (e) { console.warn('[RPA] loadProfiles after execute failed', e); }
+
             } catch (e) {
                 appendRpaLog(`❌ ${p}: ${e && e.message ? e.message : String(e)}`);
             }
@@ -1610,6 +1673,8 @@ async function runRpaOnProfile(profileName, tplId) {
         console.debug('[RPA] execute response for', profileName, j);
         const runner = j && j.result ? j.result : null;
         if (runner && runner.success) appendRpaLog(`✅ ${profileName}: success`); else appendRpaLog(`❌ ${profileName}: ${runner && runner.error ? runner.error : (j && (j.error||j.message) ? (j.error||j.message) : 'failed')}`);
+        // ensure UI updates (remove ephemeral/opened profile from selection if server opened it)
+        try { await loadProfiles(); } catch(e) { console.warn('loadProfiles after runRpaOnProfile failed', e); }
     } catch (e) {
         appendRpaLog(`❌ ${profileName}: ${e && e.message ? e.message : String(e)}`);
     }
