@@ -1794,4 +1794,31 @@ safeOn('rpa-quick-cancel', 'click', (e) => {
     } catch(e) { console.error('rpa-quick-cancel handler failed', e); }
 });
 
+// Ensure any pending handlers added after initApp are attached: retry a few times
+function processPendingHandlers(retries = 5, interval = 200) {
+    if (!__pendingHandlers || __pendingHandlers.length === 0) return;
+    let attempts = 0;
+    const intervalId = setInterval(() => {
+        attempts++;
+        for (let i = __pendingHandlers.length - 1; i >= 0; i--) {
+            const h = __pendingHandlers[i];
+            try {
+                const el = getEl(h.id);
+                if (el) {
+                    el.addEventListener(h.event, h.handler);
+                    __pendingHandlers.splice(i, 1);
+                    console.log('[app.js] processPendingHandlers: attached handler for', h.id);
+                }
+            } catch (e) { console.error('processPendingHandlers attach error', e); }
+        }
+        if (__pendingHandlers.length === 0 || attempts >= retries) {
+            clearInterval(intervalId);
+            if (__pendingHandlers.length > 0) console.warn('[app.js] processPendingHandlers: some handlers could not be attached:', __pendingHandlers.map(h=>h.id));
+        }
+    }, interval);
+}
+
+// Kick off final attempt to attach any handlers that were queued after initApp
+setTimeout(() => processPendingHandlers(6, 250), 300);
+
 // End of file
