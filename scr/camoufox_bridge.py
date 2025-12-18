@@ -138,6 +138,7 @@ class BrowserManager:
 
                 launch_config = {
                     "headless": False,
+                    "geoip": True,
                     "persistent_context": True,
                     "user_data_dir": str(profile_path),
                     "os": os_type,
