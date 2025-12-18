@@ -43,8 +43,26 @@ function attachBridgeListener(bridge) {
                     pendingBridgeResponses.delete(rid);
                     try { h.resolve(msg); } catch (e) { h.reject(e); }
                 } else {
-                    // No pending request for this message - log and ignore
-                    console.warn(timeLog() + ' [bridge] unmatched message:', msg);
+                    // No pending request for this message - treat as event: update manage.active if possible
+                    try {
+                        if (msg && msg.profile) {
+                            // Some bridge messages are notifications like { success: true, profile: 'name', ... }
+                            if (msg.success) {
+                                active[msg.profile] = true;
+                                console.log(timeLog() + ` [bridge] notification: profile ${msg.profile} marked active`);
+                            } else if (msg.success === false && msg.error && String(msg.error).toLowerCase().includes('closed')) {
+                                // profile closed
+                                try { delete active[msg.profile]; } catch(e) {}
+                                console.log(timeLog() + ` [bridge] notification: profile ${msg.profile} marked closed`);
+                            } else {
+                                console.warn(timeLog() + ' [bridge] unmatched message (profile):', msg);
+                            }
+                        } else {
+                            console.warn(timeLog() + ' [bridge] unmatched message:', msg);
+                        }
+                    } catch (e) {
+                        console.warn(timeLog() + ' [bridge] unmatched message handling error', e, msg);
+                    }
                 }
             }
         } catch (e) { console.error(timeLog() + ' [bridge] stdout handler error', e); }
