@@ -1001,35 +1001,52 @@ async function processRpaQueue() {
             // ensure profile is marked open in DB / manage.active
             let ready = false;
 
-            // If profile is currently being opened via the openQueue, wait for that specific open (fast)
-            if (openingProfiles.has(profile)) {
+            // First, try a fast bridge probe: if the bridge already has this profile open, mark active immediately
+            try {
+                if (manage && typeof manage.checkProfileInBridge === 'function') {
+                    const brQuick = await manage.checkProfileInBridge(profile, 400).catch(() => null);
+                    if (brQuick) {
+                        try { if (manage && manage.active) manage.active[profile] = true; } catch(e) {}
+                        ready = true;
+                    }
+                }
+            } catch (e) {}
+
+            // If not ready yet, but profile is being opened concurrently, wait for that specific open (fast)
+            if (!ready && openingProfiles.has(profile)) {
                 try {
-                    await waitForProfileOpen(profile, 5000).catch(() => null);
+                    await waitForProfileOpen(profile, 3000).catch(() => null);
                     if (manage && manage.active && manage.active[profile]) ready = true;
                 } catch (e) {}
             }
 
             if (!ready) {
                 const startWait = Date.now();
-                const waitTimeout = 5000; // reduce overall wait
+                const waitTimeout = 3000; // shorter overall wait
                 while ((Date.now() - startWait) < waitTimeout) {
                     try {
-                        // quick guard: check manage.active
                         if (manage && manage.active && manage.active[profile]) { ready = true; break; }
-                        // ask bridge via manage.checkProfileInBridge if available (shorter timeout)
                         if (manage && typeof manage.checkProfileInBridge === 'function') {
-                            const br = await manage.checkProfileInBridge(profile, 500).catch(() => null);
-                            if (br) { ready = true; break; }
+                            const br = await manage.checkProfileInBridge(profile, 300).catch(() => null);
+                            if (br) {
+                                try { if (manage && manage.active) manage.active[profile] = true; } catch(e) {}
+                                ready = true; break;
+                            }
                         }
                     } catch (e) {}
-                    await new Promise(rp => setTimeout(rp, 150));
+                    await new Promise(rp => setTimeout(rp, 100));
                 }
             }
 
             if (!ready) {
                 console.warn('[RPA_QUEUE] profile not ready in bridge/db before RPA:', profile);
-                // attempt to open via manage.open_Profile as last resort (but short)
-                try { await manage.open_Profile(profile); await new Promise(rp => setTimeout(rp, 300)); } catch (e) { /* ignore */ }
+                // attempt to open via manage.open_Profile as last resort (single attempt)
+                try {
+                    await manage.open_Profile(profile);
+                    // small settle
+                    await new Promise(rp => setTimeout(rp, 250));
+                    if (manage && manage.active && manage.active[profile]) ready = true;
+                } catch (e) { /* ignore */ }
             }
 
             // run RPA
