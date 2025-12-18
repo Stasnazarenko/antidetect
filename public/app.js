@@ -1676,4 +1676,122 @@ document.addEventListener('click', async (ev) => {
     }
 });
 
+// RPA run helpers: log and run functions
+function appendRpaLog(msg) {
+    const logDiv = getEl('rpa-quick-log');
+    if (!logDiv) return;
+    logDiv.style.display = 'block';
+    const p = document.createElement('div'); p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    logDiv.appendChild(p);
+    logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+async function runRpaOnProfile(profileName, tplId) {
+    const tpl = rpaTemplatesCache.find(t => t.id === tplId);
+    if (!tpl) {
+        await loadRpaTemplates();
+    }
+    const tpl2 = rpaTemplatesCache.find(t => t.id === tplId);
+    if (!tpl2) { showNotification('Template not found', 'error'); return; }
+    const sequence = tpl2.sequence || [];
+    appendRpaLog(`Starting on ${profileName} ...`);
+    try {
+        const resp = await fetch('/api/rpa/execute', { method: 'POST', headers: { 'Content-Type':'application/json' }, body: JSON.stringify({ profile: profileName, sequence: sequence, options: {} }) });
+        let j;
+        try { j = await resp.json(); } catch(e) { j = { success:false, error: 'Invalid JSON from server' }; }
+        const runner = j && j.result ? j.result : j;
+        if (runner && runner.success) appendRpaLog(`✅ ${profileName}: success`); else appendRpaLog(`❌ ${profileName}: ${runner && runner.error ? runner.error : (j&&j.error?j.error:'failed')}`);
+        try { await loadProfiles(); } catch(e) { console.warn('loadProfiles after runRpaOnProfile failed', e); }
+    } catch (e) {
+        appendRpaLog(`❌ ${profileName}: ${e && e.message ? e.message : String(e)}`);
+    }
+}
+
+async function runRpaOnSelected() {
+    const tplSel = getEl('rpa-template-select');
+    if (!tplSel || !tplSel.value) { showNotification('Choose a template first', 'error'); return; }
+    const tplId = tplSel.value;
+
+    // prepare list of valid targets (closed profiles only)
+    const allSelected = Array.from(selectedProfiles);
+    const validTargets = [];
+    const skipped = [];
+    for (const name of allSelected) {
+        const p = profiles.find(x => x.name === name);
+        if (!p) { skipped.push(name); continue; }
+        if (p.open) skipped.push(name); else validTargets.push(name);
+    }
+    if (skipped.length > 0) {
+        const shown = skipped.slice(0,5).join(', ');
+        showNotification(`Skipping ${skipped.length} open/unavailable profile(s): ${shown}${skipped.length>5?', ...':''}`, 'info');
+    }
+    if (validTargets.length === 0) { showNotification('No closed profiles selected for RPA (open profiles are skipped).', 'error'); return; }
+
+    const logDiv = getEl('rpa-quick-log'); if (logDiv) { logDiv.style.display = 'block'; logDiv.innerHTML = ''; }
+    const runBtn = getEl('rpa-run-selected-btn'); if (runBtn) runBtn.disabled = true;
+
+    for (let i = 0; i < validTargets.length; i++) {
+        const p = validTargets[i];
+        // remove from selection immediately to avoid stale selection when profile becomes open
+        try { selectedProfiles.delete(p); renderProfiles(); } catch(e){}
+        const delayMs = 800 * i + Math.round(Math.random() * 1200);
+        setTimeout(async () => {
+            await runRpaOnProfile(p, tplId);
+            // when last finished, re-enable button and close modal after a short delay
+            if (i === validTargets.length - 1) {
+                try { if (runBtn) runBtn.disabled = false; } catch(e){}
+                setTimeout(() => { try { hideModal('rpa-quick-modal'); } catch(e){} }, 1200);
+            }
+        }, delayMs);
+    }
+}
+
+// Wire RPA quick-run Run and Cancel buttons
+safeOn('rpa-run-selected-btn', 'click', async (e) => {
+    try {
+        e && e.preventDefault && e.preventDefault();
+        const tplSel = getEl('rpa-template-select');
+        if (!tplSel || !tplSel.value) { showNotification('Choose RPA template first', 'error'); return; }
+
+        // If any profiles selected -> run on selected
+        const profilesToRun = Array.from(selectedProfiles);
+        if (profilesToRun.length > 0) {
+            await runRpaOnSelected();
+            return;
+        }
+
+        // No selection -> ephemeral fallback
+        const useEphemeral = (getEl('rpa-use-ephemeral') && getEl('rpa-use-ephemeral').checked);
+        if (!useEphemeral) { showNotification('No profiles selected', 'error'); return; }
+
+        // create ephemeral and run on it
+        try {
+            showNotification('Creating ephemeral profile...', 'info');
+            const resp = await fetch('/api/profiles/ephemeral', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+            const j = await resp.json();
+            if (!j || !j.success) { showNotification(j && j.error ? j.error : 'Failed to create ephemeral profile', 'error'); return; }
+            const ephemeralName = j.ephemeral || j.name || (j.profile && j.profile.name) || null;
+            if (!ephemeralName) { showNotification('Ephemeral created but no name returned', 'error'); return; }
+            showNotification('Ephemeral created: ' + ephemeralName, 'success');
+            await runRpaOnProfile(ephemeralName, tplSel.value);
+            setTimeout(() => { try { hideModal('rpa-quick-modal'); } catch(e){} }, 1200);
+        } catch (err) {
+            console.error('Failed to create ephemeral profile', err);
+            showNotification('Failed to create ephemeral profile', 'error');
+        }
+
+    } catch (err) {
+        console.error('rpa-run-selected-btn handler failed', err);
+        showNotification('RPA run failed', 'error');
+    }
+});
+
+safeOn('rpa-quick-cancel', 'click', (e) => {
+    try {
+        e && e.preventDefault && e.preventDefault();
+        hideModal('rpa-quick-modal');
+        const log = getEl('rpa-quick-log'); if (log) { log.style.display = 'none'; log.innerHTML = ''; }
+    } catch(e) { console.error('rpa-quick-cancel handler failed', e); }
+});
+
 // End of file
