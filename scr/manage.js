@@ -14,6 +14,68 @@ let pythonBridge = null;
 let active = {};
 let _bridgeWatcher = null;
 
+// Pending responses map for bridge requests
+const pendingBridgeResponses = new Map();
+let bridgeStdoutBuffer = '';
+let bridgeListenerAttached = false;
+
+function genRequestId() {
+    return Date.now().toString() + '_' + Math.random().toString(36).slice(2,8);
+}
+
+function attachBridgeListener(bridge) {
+    if (!bridge || bridgeListenerAttached) return;
+    bridgeListenerAttached = true;
+
+    bridge.stdout.on('data', (chunk) => {
+        try {
+            bridgeStdoutBuffer += chunk.toString();
+            let nl;
+            while ((nl = bridgeStdoutBuffer.indexOf('\n')) !== -1) {
+                const line = bridgeStdoutBuffer.slice(0, nl).trim();
+                bridgeStdoutBuffer = bridgeStdoutBuffer.slice(nl + 1);
+                if (!line) continue;
+                let msg = null;
+                try { msg = JSON.parse(line); } catch (e) { console.error(timeLog() + ' [bridge] invalid JSON:', line); continue; }
+                const rid = msg && msg.requestId ? msg.requestId : null;
+                if (rid && pendingBridgeResponses.has(rid)) {
+                    const h = pendingBridgeResponses.get(rid);
+                    pendingBridgeResponses.delete(rid);
+                    try { h.resolve(msg); } catch (e) { h.reject(e); }
+                } else {
+                    // No pending request for this message - log and ignore
+                    console.warn(timeLog() + ' [bridge] unmatched message:', msg);
+                }
+            }
+        } catch (e) { console.error(timeLog() + ' [bridge] stdout handler error', e); }
+    });
+
+    bridge.stderr.on('data', (d) => { console.error(timeLog() + ' Bridge stderr:', d.toString()); });
+    bridge.on('close', (code) => { console.log(timeLog() + ` Bridge process closed (${code})`); bridgeListenerAttached = false; });
+}
+
+function sendBridgeCommand(bridge, command, timeoutMs = 30000) {
+    return new Promise((resolve, reject) => {
+        try {
+            const rid = genRequestId();
+            command.requestId = rid;
+            attachBridgeListener(bridge);
+
+            const to = setTimeout(() => {
+                if (pendingBridgeResponses.has(rid)) pendingBridgeResponses.delete(rid);
+                reject(new Error('Bridge response timeout'));
+            }, timeoutMs);
+
+            pendingBridgeResponses.set(rid, {
+                resolve: (msg) => { clearTimeout(to); resolve(msg); },
+                reject: (err) => { clearTimeout(to); reject(err); }
+            });
+
+            bridge.stdin.write(JSON.stringify(command) + '\n');
+        } catch (e) { reject(e); }
+    });
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -67,6 +129,9 @@ async function ensureBridge() {
             reject(new Error(`Failed to start Python bridge: ${err.message}`));
         });
     });
+
+    // attach robust listener so responses are routed by requestId
+    try { attachBridgeListener(pythonBridge); } catch (e) { console.warn('attachBridgeListener failed', e); }
 
     pythonBridge.stderr.on('data', (data) => {
         console.error(timeLog() + ' Bridge error:', data.toString());
@@ -262,11 +327,7 @@ async function launch_Profile(name) {
     if (!fingerprint) {
         fingerprint = false;
     } else if (typeof fingerprint === 'string') {
-        try {
-            fingerprint = JSON.parse(fingerprint);
-        } catch {
-            fingerprint = false;
-        }
+        try { fingerprint = JSON.parse(fingerprint); } catch { fingerprint = false; }
     } else if (typeof fingerprint !== 'object') {
         fingerprint = false;
     }
@@ -275,57 +336,32 @@ async function launch_Profile(name) {
 
     console.log(timeLog() + ` Profile ${name} fingerprint:`, fingerprint ? 'custom' : 'auto-generate');
 
-    const command = {
-        action: 'launch',
-        profile: name,
-        config: {
-            fingerprint: fingerprint
-        }
-    };
+    const command = { action: 'launch', profile: name, config: { fingerprint: fingerprint } };
+    if (proxy && typeof proxy === 'object' && proxy.server) { command.config.proxy = proxy; command.config.proxyType = proxyType || proxy.type || null; }
 
-    // Додаємо проксі у конфіг лише якщо воно задане
-    if (proxy && typeof proxy === 'object' && proxy.server) {
-        command.config.proxy = proxy;
-        command.config.proxyType = proxyType || proxy.type || null;
+    if (command.config && command.config.proxy) {
+        try { await testProxyLocal(command.config.proxy); console.log(timeLog() + ` Proxy for ${name} passed local test`); } catch (err) { console.error(timeLog() + ` Proxy test failed for ${name}: ${err.message}`); throw err; }
     }
 
-                // before sending command to bridge: тестуємо проксі локально
-                if (command.config && command.config.proxy) {
-                    try {
-                        await testProxyLocal(command.config.proxy);
-                        console.log(timeLog() + ` Proxy for ${name} passed local test`);
-                    } catch (err) {
-                        console.error(timeLog() + ` Proxy test failed for ${name}: ${err.message}`);
-                        throw err;
-                    }
-                }
-
-    // Normalize fingerprint for Camoufox
     command.config.fingerprint = normalizeFingerprintForCamoufox(command.config.fingerprint);
 
-    // Send command to bridge
-    bridge.stdin.write(JSON.stringify(command) + '\n');
-
-    // Wait for response
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            reject(new Error('Launch timeout'));
-        }, 30000); // increased from 10000 to 30000
-
-        bridge.stdout.once('data', (data) => {
-            clearTimeout(timeout);
+    const resp = await sendBridgeCommand(bridge, command, 30000);
+    if (resp && resp.success) {
+        // wait for bridge internal registration (best-effort)
+        const waitStart = Date.now(); const waitTimeout = 12000; let seen = false;
+        while ((Date.now() - waitStart) < waitTimeout) {
             try {
-                const response = JSON.parse(data.toString());
-                if (response.success) {
-                    resolve(response);
-                } else {
-                    reject(new Error(response.error || 'Launch failed'));
-                }
-            } catch (e) {
-                reject(new Error('Invalid response: ' + data.toString()));
-            }
-        });
-    });
+                // try to query bridge status for profile via a lightweight action if available
+                const statusCmd = { action: 'status', profile: name };
+                const st = await sendBridgeCommand(bridge, statusCmd, 1000).catch(() => null);
+                if (st && (st.open || st.success)) { seen = true; break; }
+            } catch (e) {}
+            await new Promise(r => setTimeout(r, 300));
+        }
+        if (!seen) console.warn(timeLog() + ` launch_Profile: bridge did not confirm profile ${name} registration in ${waitTimeout}ms`);
+        return resp;
+    }
+    throw new Error(resp && resp.error ? resp.error : 'Launch failed');
 }
 
 async function create_Profile(name, options = {}) {
@@ -405,40 +441,16 @@ async function close_Profile(name) {
 
     const bridge = await ensureBridge();
 
-    const command = {
-        action: 'close',
-        profile: name
-    };
-
-    bridge.stdin.write(JSON.stringify(command) + '\n');
-
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            reject(new Error('Close timeout'));
-        }, 5000);
-
-        bridge.stdout.once('data', (data) => {
-            clearTimeout(timeout);
-            try {
-                const response = JSON.parse(data.toString());
-                if (response.success) {
-                    db.close_Profile(name).then(() => {
-                        delete active[name]; // <--- Видаляємо профіль з active
-                        console.log(timeLog() + ` Profile ${name} closed successfully`);
-                        resolve(response);
-                    });
-                } else {
-                    // Якщо профіль не відкритий - все одно оновлюємо БД
-                    db.close_Profile(name).then(() => {
-                        delete active[name]; // <--- Видаляємо профіль з active
-                        resolve(response);
-                    });
-                }
-            } catch (e) {
-                reject(new Error('Invalid response: ' + data.toString()));
-            }
-        });
-    });
+    const resp = await sendBridgeCommand(bridge, { action: 'close', profile: name }, 5000);
+    if (resp && resp.success) {
+        await db.close_Profile(name);
+        delete active[name];
+        console.log(timeLog() + ` Profile ${name} closed successfully`);
+        return resp;
+    }
+    await db.close_Profile(name);
+    delete active[name];
+    return resp;
 }
 
 async function cleanup_DeadBrowsers() {
@@ -446,32 +458,9 @@ async function cleanup_DeadBrowsers() {
 
     const bridge = await ensureBridge();
 
-    const command = {
-        action: 'cleanup'
-    };
-
-    bridge.stdin.write(JSON.stringify(command) + '\n');
-
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            reject(new Error('Cleanup timeout'));
-        }, 5000);
-
-        bridge.stdout.once('data', (data) => {
-            clearTimeout(timeout);
-            try {
-                const response = JSON.parse(data.toString());
-                if (response.success) {
-                    console.log(timeLog() + ` Cleaned ${response.cleaned} dead browsers`);
-                    resolve(response);
-                } else {
-                    reject(new Error(response.error || 'Cleanup failed'));
-                }
-            } catch (e) {
-                reject(new Error('Invalid response: ' + data.toString()));
-            }
-        });
-    });
+    const resp = await sendBridgeCommand(bridge, { action: 'cleanup' }, 5000);
+    if (resp && resp.success) { console.log(timeLog() + ` Cleaned ${resp.cleaned} dead browsers`); return resp; }
+    throw new Error(resp && resp.error ? resp.error : 'Cleanup failed');
 }
 
 // Скидання статусу всіх профілів на "закрито"
@@ -700,29 +689,9 @@ async function launch_Ephemeral(options = {}) {
     // Normalize fingerprint for Camoufox
     command.config.fingerprint = normalizeFingerprintForCamoufox(command.config.fingerprint);
 
-    // Send command to bridge
-    bridge.stdin.write(JSON.stringify(command) + '\n');
-
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            reject(new Error('Ephemeral launch timeout'));
-        }, 30000);
-
-        bridge.stdout.once('data', (data) => {
-            clearTimeout(timeout);
-            try {
-                const response = JSON.parse(data.toString());
-                if (response.success) {
-                    // Do NOT persist anything in DB for ephemeral
-                    resolve({ success: true, name: ephemeralName, bridge: response });
-                } else {
-                    reject(new Error(response.error || 'Ephemeral launch failed'));
-                }
-            } catch (e) {
-                reject(new Error('Invalid response: ' + data.toString()));
-            }
-        });
-    });
+    const resp = await sendBridgeCommand(bridge, command, 30000);
+    if (resp && resp.success) return { success: true, name: ephemeralName, bridge: resp };
+    throw new Error(resp && resp.error ? resp.error : 'Ephemeral launch failed');
 }
 
 async function run_RPA(profile, sequence = [], options = {}) {
@@ -737,28 +706,24 @@ async function run_RPA(profile, sequence = [], options = {}) {
         options: options || {}
     };
 
-    // send command
-    bridge.stdin.write(JSON.stringify(command) + '\n');
-
-    return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            reject(new Error('RPA execution timeout'));
-        }, 60000);
-
-        bridge.stdout.once('data', (data) => {
-            clearTimeout(timeout);
-            try {
-                const response = JSON.parse(data.toString());
-                if (response) {
-                    resolve(response);
-                } else {
-                    reject(new Error('Invalid RPA response'));
-                }
-            } catch (e) {
-                reject(new Error('Invalid response: ' + data.toString()));
-            }
-        });
-    });
+    const resp = await sendBridgeCommand(bridge, command, 60000);
+    return resp;
 }
 
-export { create_Profile, open_Profile, close_Profile, active, set_ProfileProxy, launch_Ephemeral, delete_Profile, delete_ProfileProxy, change_ProfileFP, delete_ProfileFP, rename_Profile, cleanup_DeadBrowsers, run_RPA };
+// Check whether bridge has a profile open (calls bridge 'status' action)
+async function checkProfileInBridge(profile, timeoutMs = 1000) {
+    try {
+        if (!pythonBridge) await ensureBridge();
+        const bridge = pythonBridge;
+        if (!bridge) return false;
+        const cmd = { action: 'status', profile };
+        const resp = await sendBridgeCommand(bridge, cmd, timeoutMs).catch(() => null);
+        if (!resp) return false;
+        if (resp.success && resp.open) return true;
+        return false;
+    } catch (e) {
+        return false;
+    }
+}
+
+export { create_Profile, open_Profile, close_Profile, active, set_ProfileProxy, launch_Ephemeral, delete_Profile, delete_ProfileProxy, change_ProfileFP, delete_ProfileFP, rename_Profile, cleanup_DeadBrowsers, run_RPA, ensureBridge, checkProfileInBridge };

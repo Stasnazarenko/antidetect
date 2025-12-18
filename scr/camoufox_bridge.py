@@ -170,22 +170,53 @@ class BrowserManager:
                     proxy_try = launch_config.get("proxy")
                     attempts = []
 
-                    # 1) як dict (server, username, password, type)
-                    attempts.append(proxy_try)
+                    # Build attempts list with normalized mapping(s) only
+                    # no direct append of proxy_try (avoid passing raw dict with unknown keys)
 
                     # 2) як URL string з авторизацією або без
                     if isinstance(proxy_try, dict):
                         server = proxy_try.get('server')
                         typ = proxy_try.get('type', 'http')
-                        user = proxy_try.get('username')
-                        pwd = proxy_try.get('password')
-                        if user and pwd:
-                            attempts.append(f"{typ}://{user}:{pwd}@{server}")
-                        attempts.append(f"{typ}://{server}")
-                        # також plain host:port
-                        attempts.append(server)
+                        user = proxy_try.get('username') or proxy_try.get('user') or proxy_try.get('login')
+                        pwd = proxy_try.get('password') or proxy_try.get('pass')
+                        # normalize server into host and port
+                        host = None
+                        port = None
+                        try:
+                            if server and isinstance(server, str) and ':' in server:
+                                parts = server.split(':')
+                                host = parts[0]
+                                port = int(parts[1]) if parts[1].isdigit() else parts[1]
+                        except Exception:
+                            host = None; port = None
+
+                        # prefer passing a mapping the camoufox library expects
+                        if host and port:
+                            normalized_map = { 'host': host, 'port': port }
+                            if user: normalized_map['username'] = user
+                            if pwd: normalized_map['password'] = pwd
+                            # map type -> protocol key
+                            normalized_map['protocol'] = typ or 'http'
+                            attempts.append(normalized_map)
+
+                        # also try URL/string variants as fallback
+                        try:
+                            if user and pwd and host and port:
+                                attempts.append(f"{typ}://{user}:{pwd}@{host}:{port}")
+                            if host and port:
+                                attempts.append(f"{typ}://{host}:{port}")
+                                attempts.append(f"{host}:{port}")
+                        except Exception:
+                            pass
                     elif isinstance(proxy_try, str):
-                        attempts.append(proxy_try)
+                        # parse host:port from string and add mapping
+                        try:
+                            if ':' in proxy_try:
+                                h, p = proxy_try.split(':', 1)
+                                attempts.append({ 'host': h, 'port': int(p) if p.isdigit() else p, 'protocol': 'http' })
+                        except Exception:
+                            # fallback: keep as string if cannot parse (camoufox may still accept)
+                            attempts.append(proxy_try)
 
                     last_error = None
                     success = False
@@ -282,7 +313,42 @@ class BrowserManager:
 
                     if not success:
                         print(f"[BRIDGE] All proxy attempts failed for {profile_name}, last error: {last_error}", file=sys.stderr)
-                        return {"success": False, "error": "Browser failed to start/connect with proxy", "detail": last_error, "proxy_attempts": attempts}
+                        # Fallback: try launching without proxy (best-effort). Some environments prefer direct connection.
+                        try:
+                            print(f"[BRIDGE] Attempting fallback launch without proxy for {profile_name}", file=sys.stderr)
+                            no_proxy_config = dict(launch_config)
+                            if 'proxy' in no_proxy_config: del no_proxy_config['proxy']
+                            camoufox = AsyncCamoufox(**no_proxy_config)
+                            browser = await camoufox.start()
+                            # attempt to create/get page
+                            try:
+                                pages = getattr(browser, 'pages', None)
+                                if pages and len(pages) > 0:
+                                    page = pages[0]
+                                else:
+                                    page = await browser.new_page()
+                            except Exception as e:
+                                print(f"[BRIDGE] Fallback no-proxy start created browser but failed to get page: {e}", file=sys.stderr)
+                                try:
+                                    if hasattr(browser, 'close'):
+                                        await browser.close()
+                                except Exception:
+                                    pass
+                                try:
+                                    if hasattr(camoufox, 'stop'):
+                                        await camoufox.stop()
+                                except Exception:
+                                    pass
+                                return {"success": False, "error": "Browser failed to start after proxy attempts", "detail": last_error, "proxy_attempts": attempts}
+
+                            # success without proxy
+                            final_browser = browser
+                            final_camoufox = camoufox
+                            final_page = page
+                            print(f"[BRIDGE] Fallback no-proxy launch succeeded for {profile_name}", file=sys.stderr)
+                        except Exception as e:
+                            print(f"[BRIDGE] Fallback no-proxy launch also failed for {profile_name}: {e}", file=sys.stderr)
+                            return {"success": False, "error": "Browser failed to start/connect with proxy", "detail": last_error, "proxy_attempts": attempts}
 
                 else:
                     # без проксі — звичайний старт
@@ -624,6 +690,20 @@ async def main():
     }) + "\n")
     sys.stdout.flush()
 
+    def send_response(obj, rid=None):
+        try:
+            if isinstance(obj, dict) and rid:
+                obj['requestId'] = rid
+            sys.stdout.write(json.dumps(obj) + "\n")
+            sys.stdout.flush()
+        except Exception:
+            # fallback: try to stringify minimally
+            try:
+                sys.stdout.write(json.dumps({'success': False, 'error': 'Response serialization failed', 'requestId': rid}) + "\n")
+                sys.stdout.flush()
+            except Exception:
+                pass
+
     for line in sys.stdin:
         try:
             command = json.loads(line.strip())
@@ -638,42 +718,47 @@ async def main():
                     # якщо не вдається розпарсити — замінюємо на пустий dict
                     cfg = {}
 
+            rid = command.get('requestId')
+
             if action == "launch":
-                result = await manager.launch_profile(
-                    command.get("profile"),
-                    cfg
-                )
-                sys.stdout.write(json.dumps(result) + "\n")
-                sys.stdout.flush()
+                result = await manager.launch_profile(command.get("profile"), cfg)
+                send_response(result, rid)
+
             elif action == "close":
                 result = await manager.close_profile(command.get("profile"))
-                sys.stdout.write(json.dumps(result) + "\n")
-                sys.stdout.flush()
+                send_response(result, rid)
+
             elif action == "cleanup":
                 cleaned = await manager._cleanup_dead_browsers()
-                sys.stdout.write(json.dumps({
-                    "success": True,
-                    "cleaned": cleaned
-                }) + "\n")
-                sys.stdout.flush()
+                send_response({"success": True, "cleaned": cleaned}, rid)
+
             elif action == 'rpa':
                 # action: rpa, profile: name, sequence: [{type, ...}], options: {}
                 seq = command.get('sequence', [])
                 opts = command.get('options', {})
                 result = await manager.execute_rpa_sequence(command.get('profile'), seq, opts)
-                sys.stdout.write(json.dumps(result) + "\n")
-                sys.stdout.flush()
+                send_response(result, rid)
+
+            elif action == 'status':
+                # return status for a profile (open/url/title)
+                result = await manager.get_profile_status(command.get('profile'))
+                send_response(result, rid)
+
             elif action == "shutdown":
                 for pname in list(manager.browsers.keys()):
                     await manager.close_profile(pname)
                 break
+
         except Exception as e:
-            sys.stdout.write(json.dumps({
-                "success": False,
-                "error": str(e),
-                "trace": traceback.format_exc()
-            }) + "\n")
-            sys.stdout.flush()
+            # send error response (include requestId if available)
+            try:
+                send_response({"success": False, "error": str(e), "trace": traceback.format_exc()}, command.get('requestId'))
+            except Exception:
+                # If even sending response fails, write minimal error to stderr
+                try:
+                    print('[BRIDGE] Fatal error handling command:', str(e), file=sys.stderr)
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":

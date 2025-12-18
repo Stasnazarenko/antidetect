@@ -151,19 +151,12 @@ app.post('/api/profiles', async (req, res) => {
 app.post('/api/profiles/:name/open', async (req, res) => {
     try {
         const { name } = req.params;
-        console.log(`[API] Opening profile: ${name}`);
-
-        await manage.open_Profile(name);
-
-        // Затримка щоб БД встигла оновитись
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        io.emit('profile_opened', { name });
-
-        res.json({ success: true });
+        console.log(`[API] Enqueue opening profile: ${name}`);
+        const result = await enqueueOpenProfile(name);
+        res.json({ success: true, result });
     } catch (error) {
-        console.error(`[API] Error opening profile:`, error.message);
-        res.status(500).json({ success: false, error: error.message });
+        console.error(`[API] Error opening profile (queued):`, error && error.message ? error.message : error);
+        res.status(500).json({ success: false, error: error && error.message ? error.message : String(error) });
     }
 });
 
@@ -901,83 +894,105 @@ app.post('/api/rpa/execute', async (req, res) => {
             return res.status(500).json({ success: false, error: 'RPA runner not available on server' });
         }
 
-        const start = Date.now();
-        let result;
-
-        // Helper to call run_RPA and capture errors
-        const callRunner = async () => {
-            try {
-                return await manage.run_RPA(profile, sequence, options || {});
-            } catch (e) {
-                return { success: false, error: String(e && e.message ? e.message : e) };
-            }
-        };
-
-        // First attempt
-        result = await callRunner();
-
-        // If the result indicates the profile was not open, try to open it and retry once
-        try {
-            const extractError = (r) => {
-                if (!r) return '';
-                if (typeof r === 'string') return r;
-                if (r.error) return r.error;
-                if (r.result && r.result.error) return r.result.error;
-                return '';
-            };
-
-            const errMsg = (result && extractError(result)) || '';
-            if (errMsg && /profile not open/i.test(errMsg)) {
-                console.log('[API][RPA] profile not open, attempting to open and retry:', profile);
-                try {
-                    if (manage.open_Profile) {
-                        // Try to open profile (this will launch browser via bridge)
-                        await manage.open_Profile(profile);
-                        // Wait a bit for the bridge/browser to settle
-                        await new Promise(r => setTimeout(r, 1200));
-                        // Retry RPA
-                        result = await callRunner();
-                    } else {
-                        console.warn('[API][RPA] manage.open_Profile not available on server');
-                    }
-                } catch (openErr) {
-                    console.error('[API][RPA] Failed to open profile for RPA retry:', openErr);
-                    result = { success: false, error: 'Failed to open profile: ' + (openErr && openErr.message ? openErr.message : String(openErr)) };
-                }
-            }
-        } catch (inner) {
-            console.error('[API][RPA] Error handling profile-open retry logic:', inner);
-        }
-
-        const end = Date.now();
-
-        // Persist run
-        try {
-            const runs = readRpaRuns();
-            const runItem = {
-                id: Date.now().toString() + '_' + Math.random().toString(36).slice(2,8),
-                profile: profile,
-                success: !!(result && result.success),
-                error: result && (result.error || (result.result && result.result.error)) ? (result.error || result.result.error) : null,
-                sequence: JSON.stringify(sequence),
-                options: options || {},
-                durationMs: end - start,
-                timestamp: new Date().toISOString()
-            };
-            runs.unshift(runItem);
-            // keep last 500 runs to avoid disk bloat
-            if (runs.length > 500) runs.length = 500;
-            writeRpaRuns(runs);
-            io.emit('rpa_runs_updated');
-        } catch (e) {
-            console.error('Failed to persist RPA run', e);
-        }
-
+        const result = await enqueueRpaJob(profile, sequence, options || {});
         res.json({ success: true, result });
     } catch (error) {
-        console.error('[API] Error executing RPA (outer):', error && error.stack ? error.stack : error);
+        console.error('[API] enqueue rpa error', error && error.message ? error.message : error);
         res.status(500).json({ success: false, error: String(error && error.message ? error.message : error) });
     }
 });
 
-// END additional RPA endpoints
+// ------------------------------------------------------------------
+// Simple FIFO queue to serialize profile openings and RPA jobs
+const openQueue = [];
+let openProcessing = false;
+async function processOpenQueue() {
+    if (openProcessing) return;
+    openProcessing = true;
+    while (openQueue.length > 0) {
+        const job = openQueue.shift();
+        const { name, resolve, reject } = job;
+        try {
+            console.log('[OPEN_QUEUE] processing', name);
+            // call manage.open_Profile which returns promise
+            const r = await manage.open_Profile(name);
+            // small delay to let bridge/db sync
+            await new Promise(rp => setTimeout(rp, 200));
+            io.emit('profile_opened', { name });
+            resolve({ success: true });
+        } catch (e) {
+            console.error('[OPEN_QUEUE] failed to open', name, e && e.message ? e.message : e);
+            reject(e);
+        }
+        // throttle between opens
+        await new Promise(rp => setTimeout(rp, 150));
+    }
+    openProcessing = false;
+}
+function enqueueOpenProfile(name) {
+    return new Promise((resolve, reject) => {
+        openQueue.push({ name, resolve, reject });
+        processOpenQueue().catch(err => console.error('[OPEN_QUEUE] processor error', err));
+    });
+}
+
+const rpaQueue = [];
+let rpaProcessing = false;
+async function processRpaQueue() {
+    if (rpaProcessing) return;
+    rpaProcessing = true;
+    while (rpaQueue.length > 0) {
+        const job = rpaQueue.shift();
+        const { profile, sequence, options, resolve, reject } = job;
+        try {
+            console.log('[RPA_QUEUE] processing', profile);
+            // ensure profile is marked open in DB / manage.active
+            const startWait = Date.now();
+            const waitTimeout = 15000;
+            let ready = false;
+            while ((Date.now() - startWait) < waitTimeout) {
+                try {
+                    // check manage.active as quick guard
+                    if (manage && manage.active && manage.active[profile]) { ready = true; break; }
+                    // try asking bridge via manage.checkProfileInBridge if available
+                    if (manage && typeof manage.checkProfileInBridge === 'function') {
+                        const br = await manage.checkProfileInBridge(profile, 1000).catch(() => null);
+                        if (br) { ready = true; break; }
+                    }
+                } catch (e) {}
+                await new Promise(rp => setTimeout(rp, 250));
+            }
+            if (!ready) {
+                console.warn('[RPA_QUEUE] profile not ready in bridge/db before RPA:', profile);
+                // attempt to open via manage.open_Profile as last resort
+                try { await manage.open_Profile(profile); await new Promise(rp => setTimeout(rp, 500)); } catch (e) { /* ignore */ }
+            }
+
+            // run RPA
+            const res = await manage.run_RPA(profile, sequence, options || {});
+            // persist run (best-effort)
+            try {
+                const runs = readRpaRuns();
+                const runItem = { id: Date.now().toString() + '_' + Math.random().toString(36).slice(2,8), profile: profile, success: !!(res && res.success), error: res && (res.error || (res.result && res.result.error)) ? (res.error || res.result.error) : null, sequence: JSON.stringify(sequence), options: options || {}, durationMs: 0, timestamp: new Date().toISOString() };
+                runs.unshift(runItem);
+                if (runs.length > 500) runs.length = 500;
+                writeRpaRuns(runs);
+                io.emit('rpa_runs_updated');
+            } catch (e) { console.error('[RPA_QUEUE] failed to persist run', e); }
+
+            resolve(res);
+        } catch (e) {
+            console.error('[RPA_QUEUE] job failed for', profile, e && e.message ? e.message : e);
+            reject(e);
+        }
+        await new Promise(rp => setTimeout(rp, 200));
+    }
+    rpaProcessing = false;
+}
+function enqueueRpaJob(profile, sequence, options) {
+    return new Promise((resolve, reject) => {
+        rpaQueue.push({ profile, sequence, options, resolve, reject });
+        processRpaQueue().catch(err => console.error('[RPA_QUEUE] processor error', err));
+    });
+}
+// ------------------------------------------------------------------
