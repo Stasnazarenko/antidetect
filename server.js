@@ -37,6 +37,64 @@ try {
     throw e;
 }
 
+// Cleanup leftover ephemeral profiles on server start
+async function cleanupEphemeralOnStartup() {
+    try {
+        // first, try to cleanup dead browsers via manage (best-effort)
+        try {
+            if (manage && typeof manage.cleanup_DeadBrowsers === 'function') {
+                await manage.cleanup_DeadBrowsers().catch(() => null);
+            }
+        } catch (e) {}
+
+        const profilesDir = path.join(__dirname, 'profiles');
+        if (!fs.existsSync(profilesDir)) return;
+        const items = fs.readdirSync(profilesDir, { withFileTypes: true });
+        for (const it of items) {
+            try {
+                if (!it.isDirectory()) continue;
+                const name = it.name;
+                if (!name.startsWith('_ephemeral_')) continue;
+                const full = path.join(profilesDir, name);
+
+                // Skip removal if manage reports profile active or bridge status indicates open
+                try {
+                    if (manage) {
+                        try {
+                            if (manage.active && manage.active[name]) {
+                                console.log('[STARTUP_CLEANUP] skipping active ephemeral (manage.active):', name);
+                                continue;
+                            }
+                        } catch (e) {}
+                        try {
+                            if (typeof manage.checkProfileInBridge === 'function') {
+                                const open = await manage.checkProfileInBridge(name, 800).catch(() => false);
+                                if (open) {
+                                    console.log('[STARTUP_CLEANUP] skipping active ephemeral (bridge):', name);
+                                    continue;
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                } catch (e) {}
+
+                 try {
+                     console.log('[STARTUP_CLEANUP] removing leftover ephemeral folder:', full);
+                     if (fs.rmSync) fs.rmSync(full, { recursive: true, force: true }); else fs.rmdirSync(full, { recursive: true });
+                     console.log('[STARTUP_CLEANUP] removed', full);
+                 } catch (err) {
+                     console.warn('[STARTUP_CLEANUP] failed to remove', full, err && err.message ? err.message : err);
+                 }
+             } catch (e) { /* ignore per-item errors */ }
+         }
+     } catch (e) {
+         console.warn('[STARTUP_CLEANUP] failed', e && e.message ? e.message : e);
+     }
+ }
+
+// Run startup cleanup (await so it's done before serving requests)
+await cleanupEphemeralOnStartup();
+
 // Отримати список профілів
 app.get('/api/profiles', async (req, res) => {
     try {
@@ -173,10 +231,17 @@ app.post('/api/profiles/:name/close', async (req, res) => {
 
         io.emit('profile_closed', { name });
 
+        // If this was an ephemeral profile, try to remove its folder as a fallback
+        try {
+            removeEphemeralFolderIfExists(name);
+        } catch (e) { console.warn('[API] Ephemeral cleanup check failed for', name, e && e.message ? e.message : e); }
+
         res.json({ success: true });
     } catch (error) {
-        console.error(`[API] Error closing profile:`, error.message);
-        res.status(500).json({ success: false, error: error.message });
+        console.error(`[API] Error closing profile:`, error && error.message ? error.message : error);
+        // Attempt ephemeral cleanup even if close failed
+        try { const name = req.params.name; removeEphemeralFolderIfExists(name); } catch(e){}
+        res.status(500).json({ success: false, error: error && error.message ? error.message : String(error) });
     }
 });
 
@@ -1082,3 +1147,18 @@ function enqueueRpaJob(profile, sequence, options) {
     });
 }
 // ------------------------------------------------------------------
+
+function removeEphemeralFolderIfExists(name) {
+    try {
+        if (typeof name === 'string' && name.startsWith('_ephemeral_')) {
+            const epPath = path.join(__dirname, 'profiles', name);
+            if (fs.existsSync(epPath)) {
+                console.log('[EPHEMERAL_REMOVE] removing', epPath);
+                if (fs.rmSync) fs.rmSync(epPath, { recursive: true, force: true }); else fs.rmdirSync(epPath, { recursive: true });
+                console.log('[EPHEMERAL_REMOVE] removed', epPath);
+            }
+        }
+    } catch (e) {
+        console.warn('[EPHEMERAL_REMOVE] failed to remove', name, e && e.message ? e.message : e);
+    }
+}
