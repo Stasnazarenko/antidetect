@@ -3,6 +3,7 @@
 .idea/
 profiles
 tests
+user-data-dir
 
 # Node modules
 node_modules/
