@@ -151,10 +151,6 @@ async function ensureBridge() {
     // attach robust listener so responses are routed by requestId
     try { attachBridgeListener(pythonBridge); } catch (e) { console.warn('attachBridgeListener failed', e); }
 
-    pythonBridge.stderr.on('data', (data) => {
-        console.error(timeLog() + ' Bridge error:', data.toString());
-    });
-
     pythonBridge.on('close', (code) => {
         console.log(timeLog() + ` Bridge exited (${code})`);
         pythonBridge = null;

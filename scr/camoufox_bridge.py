@@ -18,50 +18,82 @@ class BrowserManager:
     def _get_fingerprint_config(self, os_type: str):
         """Генерує конфігурацію фінгерпринту для вказаної ОС"""
         if os_type == "macos":
-            mac_variants = [
-                {"cores": 8, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
+            window_variants = [
+                {"outer_w":1356, "outer_h":884, "inner_w":1356, "inner_h":763, },
+                {"outer_w":1332, "outer_h":884, "inner_w":1332, "inner_h":763},
+                {"outer_w":1375, "outer_h":833, "inner_w":1375, "inner_h":712},
+                {"outer_w":1321, "outer_h":852, "inner_w":1321, "inner_h":731},
+                {"outer_w":1512, "outer_h":884, "inner_w":1512, "inner_h":850},
+                {"outer_w":1400, "outer_h":884, "inner_w":1400, "inner_h":800},
             ]
-            rm_mac_variants = [
+            user_mac_agents = [
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7; rv:146.0) Gecko/20100101 Firefox/146.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:145.0) Gecko/20100101 Firefox/145.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7; rv:145.0) Gecko/20100101 Firefox/146.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:144.0) Gecko/20100101 Firefox/144.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7; rv:144.0) Gecko/20100101 Firefox/145.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:144.0) Gecko/20100101 Firefox/145.0',
+            ]
+            variant = random.choice(window_variants)
+            user_mac_agent = random.choice(user_mac_agents);
+            mac_cores_variants = [
                 # 1–2. MacBook Air 13" M1/M2/M3/M4 (роздільна здатність 2560×1600 @2x, масштабування "looks like 1440×900")
-                {"cores": 8,  "inner_w": 1512, "inner_h": 982, "outer_w": 1440, "outer_h": 982},   # dock зверху/знизу
-                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1440, "outer_h": 982},
-
+                {"cores": 8},
+                {"cores": 10},
                 # 3–4. MacBook Air 15" M2/M3/M4 (2880×1864 @2x → looks like 1512×982)
-                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
-                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
-
+                {"cores": 10},
+                {"cores": 10},
                 # 5–8. MacBook Pro 14" M1–M4 Pro/Max (3024×1964 @2x → looks like 1512×982 або 1728×1117)
-                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},   # default scaling
-                {"cores": 12, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
-                {"cores": 12, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},  # "more space"
-                {"cores": 14, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
-
+                {"cores": 10},
+                {"cores": 12},
+                {"cores": 12},
+                {"cores": 14},
                 # 9–12. MacBook Pro 16" M1–M4 Pro/Max (3456×2234 @2x → looks like 1728×1117 або 1920×1200)
-                {"cores": 10, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
-                {"cores": 12, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
-                {"cores": 14, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},   # "more space"
-                {"cores": 16, "inner_w": 1512, "inner_h": 982, "outer_w": 1512, "outer_h": 982},
+                {"cores": 10},
+                {"cores": 12},
+                {"cores": 14},
+                {"cores": 16},
             ]
 
-            variant = random.choice(mac_variants)
-            # 'navigator.language': 'en-US',
-            # 'navigator.languages': ['en-US', 'en'],
+            core_variant = random.choice(mac_cores_variants)
+            # якщо потрібно ще щось:
+            # 'screen.width': variant["screen_width"],
+            # 'screen.height': variant["screen_height"],
+            # 'screen.availWidth': variant["screen_availWidth"],
+            # 'screen.availHeight': variant["screen_availHeight"],
             return {
                 'window.outerHeight': variant["outer_h"],
                 'window.outerWidth': variant["outer_w"],
                 'window.innerHeight': variant["inner_h"],
                 'window.innerWidth': variant["inner_w"],
+                "screen.width":1512,
+                "screen.height":982,
+                "screen.availWidth":1512,
+                "screen.availHeight":884,
+                'window.devicePixelRatio': 2.0,
                 'window.history.length': random.randint(2, 20),
-                'navigator.userAgent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Firefox/146.0',
+                'navigator.userAgent': user_mac_agent,
                 'navigator.appCodeName': 'Mozilla',
                 'navigator.appName': 'Netscape',
-                'navigator.appVersion': '5.0 (Macintosh)',
-                'navigator.oscpu': 'Intel Mac OS X 10_15_7',
+                'navigator.language': 'en-US',
+                'navigator.languages': ['en-US', 'en'],
+                'navigator.appVersion': random.choice([
+                    '5.0 (Macintosh; Intel Mac OS X 10.15)',
+                    '5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+                    '5.0 (Macintosh)'
+                ]),
+                'navigator.oscpu': random.choice([
+                    'Intel Mac OS X 10.15',
+                    'Intel Mac OS X 10_15_7',
+                ]),
                 'navigator.platform': 'MacIntel',
-                'navigator.hardwareConcurrency': variant["cores"],
+                'mediaDevices:enabled': True,
+                'navigator.hardwareConcurrency': core_variant["cores"],
                 'navigator.product': 'Gecko',
                 'navigator.productSub': '20100101',
                 'navigator.maxTouchPoints': 0,
+                # 'navigator.deviceMemory': random.choice([8, 16, 24, 32]),  # GB, типово для M-серії
             }
         else:  # windows
             windows_variants = [
@@ -93,9 +125,18 @@ class BrowserManager:
                 'navigator.platform': 'Win64',
                 'navigator.hardwareConcurrency': variant["cores"],
                 'navigator.product': 'Gecko',
-                'navigator.productSub': '20030107',
-                'navigator.maxTouchPoints': 10,
+                'navigator.language': 'en-US',
+                'navigator.languages': ['en-US', 'en'],
+                'mediaDevices:enabled': True,
+                'navigator.productSub': '20100101',
+                'navigator.maxTouchPoints': random.choice([0, 10]),  # 0 для десктопів, 10 для тач-ноутбуків
             }
+
+    def _fp_python_fallback(self, os_type: str):
+        """Compatibility wrapper: return Python-based fingerprint config.
+        Kept for callers that expect a fallback method name. Uses the main Python generator implementation.
+        """
+        return self._get_fingerprint_config(os_type)
 
     async def _cleanup_dead_browsers(self):
         """Очищає закриті браузери з реєстру"""
@@ -129,12 +170,43 @@ class BrowserManager:
                 profile_path.mkdir(exist_ok=True)
 
                 os_type_options = ["macos", "windows"]
-                os_type = random.choice(os_type_options) # Генеруємо для macOS
+                os_type = random.choice(os_type_options)  # Генеруємо для macOS
                 # fingerprint: використовуємо dict якщо є, інакше дефолт
+                fp_source = 'db'
                 if "fingerprint" in config and isinstance(config["fingerprint"], dict):
                     fingerprint_config = self._convert_db_fingerprint(config["fingerprint"])
+                    # If conversion produced an empty dict, treat as not provided and fallback to python generator
+                    if not fingerprint_config:
+                        # converted fingerprint is empty -> fallback
+                        fingerprint_config = self._fp_python_fallback(os_type)
+                        fp_source = 'python' if fingerprint_config else 'none'
+                    else:
+                        fp_source = 'db'
                 else:
-                    fingerprint_config = self._get_fingerprint_config(os_type)
+                    fingerprint_config = self._fp_python_fallback(os_type)
+                    fp_source = 'python' if fingerprint_config else 'none'
+
+                # If somehow fingerprint_config is still empty ({} or None), ensure we try python fallback
+                if not fingerprint_config:
+                    fingerprint_config = self._fp_python_fallback(os_type)
+                    if fingerprint_config:
+                        fp_source = 'python'
+                    else:
+                        fp_source = 'none'
+
+                # DEBUG: print selected fingerprint details (safe JSON dump)
+                try:
+                    try:
+                        fp_json = json.dumps(fingerprint_config, indent=2, ensure_ascii=False)
+                    except Exception:
+                        # fallback to string representation
+                        fp_json = str(fingerprint_config)
+                    print(
+                        f"[BRIDGE] Selected fingerprint for profile '{profile_name}' -> os: {os_type}, source: {fp_source}\n{fp_json}",
+                        file=sys.stderr)
+                except Exception:
+                    # ignore logging errors
+                    pass
 
                 launch_config = {
                     "headless": False,
@@ -158,7 +230,8 @@ class BrowserManager:
 
                 # Логуємо конфіг для дебагу
                 try:
-                    print(f"[BRIDGE] Launch config for {profile_name}: {json.dumps(launch_config, indent=2)}", file=sys.stderr)
+                    print(f"[BRIDGE] Launch config for {profile_name}: {json.dumps(launch_config, indent=2)}",
+                          file=sys.stderr)
                 except Exception:
                     print(f"[BRIDGE] Launch config (non-serializable) for {profile_name}", file=sys.stderr)
 
@@ -173,7 +246,7 @@ class BrowserManager:
                     # Build attempts list with normalized mapping(s) only
                     # no direct append of proxy_try (avoid passing raw dict with unknown keys)
 
-                    # 2) як URL string з авторизацією або без
+                    # 2) як URL string з авторизаціє�� або без
                     if isinstance(proxy_try, dict):
                         server = proxy_try.get('server')
                         user = proxy_try.get('username') or proxy_try.get('user') or proxy_try.get('login')
@@ -187,11 +260,12 @@ class BrowserManager:
                                 host = parts[0]
                                 port = parts[1]
                         except Exception:
-                            host = None; port = None
+                            host = None;
+                            port = None
 
                         if host and port:
                             # only two attempts: mapping and plain server string
-                            normalized_map = { 'server': f"{host}:{port}" }
+                            normalized_map = {'server': f"{host}:{port}"}
                             if user: normalized_map['username'] = user
                             if pwd: normalized_map['password'] = pwd
                             attempts.append(normalized_map)
@@ -201,7 +275,7 @@ class BrowserManager:
                         try:
                             if ':' in proxy_try:
                                 h, p = proxy_try.split(':', 1)
-                                attempts.append({ 'server': f"{h}:{p}" })
+                                attempts.append({'server': f"{h}:{p}"})
                         except Exception:
                             attempts.append(proxy_try)
 
@@ -218,7 +292,8 @@ class BrowserManager:
                             trial_config['proxy'] = attempt_proxy
 
                             try:
-                                print(f"[BRIDGE] Trying proxy format #{idx+1} for {profile_name}: {attempt_proxy}", file=sys.stderr)
+                                print(f"[BRIDGE] Trying proxy format #{idx + 1} for {profile_name}: {attempt_proxy}",
+                                      file=sys.stderr)
                             except Exception:
                                 pass
 
@@ -228,7 +303,7 @@ class BrowserManager:
                                 browser = await asyncio.wait_for(camoufox.start(), timeout=3)
                             except Exception as e:
                                 last_error = str(e)
-                                print(f"[BRIDGE] camoufox.start() failed on attempt #{idx+1}: {e}", file=sys.stderr)
+                                print(f"[BRIDGE] camoufox.start() failed on attempt #{idx + 1}: {e}", file=sys.stderr)
                                 try:
                                     if hasattr(camoufox, 'stop'):
                                         await camoufox.stop()
@@ -252,7 +327,7 @@ class BrowserManager:
                                     page = await browser.new_page()
                             except Exception as e:
                                 last_error = str(e)
-                                print(f"[BRIDGE] Failed to get/create page on attempt #{idx+1}: {e}", file=sys.stderr)
+                                print(f"[BRIDGE] Failed to get/create page on attempt #{idx + 1}: {e}", file=sys.stderr)
                                 try:
                                     if hasattr(browser, 'close'):
                                         await browser.close()
@@ -271,12 +346,12 @@ class BrowserManager:
                                 final_browser = browser
                                 final_camoufox = camoufox
                                 final_page = page
-                                print(f"[BRIDGE] Proxy attempt #{idx+1} worked for {profile_name}", file=sys.stderr)
+                                print(f"[BRIDGE] Proxy attempt #{idx + 1} worked for {profile_name}", file=sys.stderr)
                                 break
 
                         except Exception as e:
                             last_error = str(e)
-                            print(f"[BRIDGE] Exception during proxy attempt #{idx+1}: {e}", file=sys.stderr)
+                            print(f"[BRIDGE] Exception during proxy attempt #{idx + 1}: {e}", file=sys.stderr)
                             try:
                                 if camoufox and hasattr(camoufox, 'stop'):
                                     await camoufox.stop()
@@ -285,8 +360,10 @@ class BrowserManager:
                             continue
 
                     if not success:
-                        print(f"[BRIDGE] All proxy attempts failed for {profile_name}, last error: {last_error}", file=sys.stderr)
-                        return {"success": False, "error": "Browser failed to start/connect with proxy", "detail": last_error, "proxy_attempts": attempts}
+                        print(f"[BRIDGE] All proxy attempts failed for {profile_name}, last error: {last_error}",
+                              file=sys.stderr)
+                        return {"success": False, "error": "Browser failed to start/connect with proxy",
+                                "detail": last_error, "proxy_attempts": attempts}
 
                 else:
                     # без проксі — звичайний старт
@@ -295,7 +372,8 @@ class BrowserManager:
                         browser = await camoufox.start()
                     except Exception as e:
                         print(f"[BRIDGE] Camoufox.start failed for {profile_name}: {e}", file=sys.stderr)
-                        return {"success": False, "error": "Failed to start browser", "detail": str(e), "trace": traceback.format_exc()}
+                        return {"success": False, "error": "Failed to start browser", "detail": str(e),
+                                "trace": traceback.format_exc()}
 
                     # Try to get or create a page - treat success if we can create a page
                     try:
@@ -316,7 +394,8 @@ class BrowserManager:
                                 await camoufox.stop()
                         except Exception:
                             pass
-                        return {"success": False, "error": "Browser failed to initialize page after start", "detail": str(e)}
+                        return {"success": False, "error": "Browser failed to initialize page after start",
+                                "detail": str(e)}
 
                     # assign final references for consistency
                     final_browser = browser
@@ -325,7 +404,8 @@ class BrowserManager:
 
                 # після успішного старту browser має бути встановлено
                 if not (final_browser and final_page):
-                    return {"success": False, "error": "Browser object not created or no page", "proxy_used": launch_config.get('proxy')}
+                    return {"success": False, "error": "Browser object not created or no page",
+                            "proxy_used": launch_config.get('proxy')}
 
                 # Невелика пауза, щоб процес устаканився
                 try:
@@ -349,7 +429,8 @@ class BrowserManager:
                 return {"success": True, "profile": profile_name, "os": os_type}
 
             except Exception as e:
-                print(f"[BRIDGE] Exception launching profile {profile_name}: {e}\n{traceback.format_exc()}", file=sys.stderr)
+                print(f"[BRIDGE] Exception launching profile {profile_name}: {e}\n{traceback.format_exc()}",
+                      file=sys.stderr)
                 return {"success": False, "error": str(e), "trace": traceback.format_exc()}
 
     def _convert_db_fingerprint(self, db_fp: dict):
@@ -387,7 +468,7 @@ class BrowserManager:
                     username = p.username
                     password = p.password
                     if host and port:
-                        proxy_obj = { 'server': f"{host}:{port}", 'type': scheme }
+                        proxy_obj = {'server': f"{host}:{port}", 'type': scheme}
                         if username:
                             proxy_obj['username'] = username
                         if password:
@@ -401,7 +482,7 @@ class BrowserManager:
                         port = m.group('port')
                         user = m.group('user')
                         pwd = m.group('pass')
-                        proxy_obj = { 'server': f"{host}:{port}", 'type': 'http' }
+                        proxy_obj = {'server': f"{host}:{port}", 'type': 'http'}
                         if user:
                             proxy_obj['username'] = user
                         if pwd:
@@ -555,11 +636,13 @@ class BrowserManager:
                             return {"success": False, "results": results, "error": f"missing url at step {idx}"}
                         # navigation: allow step-level and options-level overrides
                         # default to 'domcontentloaded' to avoid long waits for all resources
-                        waitUntil = step.get('waitUntil') or options.get('navigationWait') if options and isinstance(options, dict) else None
+                        waitUntil = step.get('waitUntil') or options.get('navigationWait') if options and isinstance(
+                            options, dict) else None
                         if not waitUntil: waitUntil = 'domcontentloaded'
                         # per-step timeout in ms (default 10s)
                         try:
-                            navTimeout = int(step.get('timeout') or (options and options.get('navigationTimeout')) or 10000)
+                            navTimeout = int(
+                                step.get('timeout') or (options and options.get('navigationTimeout')) or 10000)
                         except Exception:
                             navTimeout = 10000
                         try:
@@ -567,12 +650,13 @@ class BrowserManager:
                         except Exception as e:
                             # navigation may fail or timeout; include error and continue/return
                             results.append({"index": idx, "type": typ, "success": False, "error": str(e)})
-                            return {"success": False, "results": results, "error": f"navigation failed at step {idx}: {e}"}
+                            return {"success": False, "results": results,
+                                    "error": f"navigation failed at step {idx}: {e}"}
                         results.append({"index": idx, "type": typ, "success": True, "url": url})
                         # optional delay in milliseconds
                         delay = int(step.get('delay') or 0)
                         if delay > 0:
-                            await asyncio.sleep(delay/1000.0)
+                            await asyncio.sleep(delay / 1000.0)
 
                     elif typ in ('execute_js', 'exec_js', 'evaluate', 'run_js'):
                         code = step.get('code') or step.get('script') or step.get('js')
@@ -585,7 +669,8 @@ class BrowserManager:
                             results.append({"index": idx, "type": typ, "success": True, "result": val})
                         except Exception as e:
                             results.append({"index": idx, "type": typ, "success": False, "error": str(e)})
-                            return {"success": False, "results": results, "error": f"js execution failed at step {idx}: {e}"}
+                            return {"success": False, "results": results,
+                                    "error": f"js execution failed at step {idx}: {e}"}
 
                     elif typ in ('click', 'click_selector'):
                         sel = step.get('selector') or step.get('sel')
@@ -619,7 +704,8 @@ class BrowserManager:
                     else:
                         # Unknown action: return error so caller can see
                         results.append({"index": idx, "type": typ, "success": False, "error": "unknown action type"})
-                        return {"success": False, "results": results, "error": f"unknown action type '{typ}' at step {idx}"}
+                        return {"success": False, "results": results,
+                                "error": f"unknown action type '{typ}' at step {idx}"}
 
                 except Exception as e:
                     # step-level exception
@@ -651,7 +737,8 @@ async def main():
         except Exception:
             # fallback: try to stringify minimally
             try:
-                sys.stdout.write(json.dumps({'success': False, 'error': 'Response serialization failed', 'requestId': rid}) + "\n")
+                sys.stdout.write(
+                    json.dumps({'success': False, 'error': 'Response serialization failed', 'requestId': rid}) + "\n")
                 sys.stdout.flush()
             except Exception:
                 pass
@@ -704,7 +791,8 @@ async def main():
         except Exception as e:
             # send error response (include requestId if available)
             try:
-                send_response({"success": False, "error": str(e), "trace": traceback.format_exc()}, command.get('requestId'))
+                send_response({"success": False, "error": str(e), "trace": traceback.format_exc()},
+                              command.get('requestId'))
             except Exception:
                 # If even sending response fails, write minimal error to stderr
                 try:
